@@ -331,15 +331,6 @@ function validateIndexes(users) {
 
 function validateImplementationStatus(plan) {
   const status = plan.implementationStatus;
-  if (!status || status.status !== 'PARTIAL' || status.remediationRequired !== true || status.blockNextGroup !== true) {
-    fail('A group must remain PARTIAL with remediation required before the next group');
-  }
-  if (!status.currentCloudBaseState || status.currentCloudBaseState.colleges !== 1 || status.currentCloudBaseState.users !== 2 || status.currentCloudBaseState.risk_rules !== 1) {
-    fail('A-group current CloudBase state must record the known partial deployment');
-  }
-  if (typeof status.knownIssue !== 'string' || !status.knownIssue.includes('usr_security_demo_001')) {
-    fail('A-group known dangling updatedBy reference must be recorded');
-  }
   const expectedSequence = [
     'create and initialize colleges',
     'initialize student and counselor users',
@@ -347,6 +338,30 @@ function validateImplementationStatus(plan) {
     'initialize risk_rules only after the security user exists and is verified'
   ];
   assertArrayEqual(plan.executionSequence.map((step) => step.operation), expectedSequence, 'executionSequence');
+
+  if (!status || !status.currentCloudBaseState) {
+    fail('A-group implementationStatus and currentCloudBaseState are required');
+  }
+  // Historical pre-remediation state support only; it is not the current A-group status.
+  if (status.status === 'PARTIAL') {
+    assertEqual(status.remediationRequired, true, 'PARTIAL remediationRequired');
+    assertEqual(status.blockNextGroup, true, 'PARTIAL blockNextGroup');
+    assertEqual(status.currentCloudBaseState.colleges, 1, 'PARTIAL colleges count');
+    assertEqual(status.currentCloudBaseState.users, 2, 'PARTIAL users count');
+    assertEqual(status.currentCloudBaseState.risk_rules, 1, 'PARTIAL risk_rules count');
+    assert(typeof status.knownIssue === 'string' && status.knownIssue.includes('usr_security_demo_001'), 'PARTIAL known dangling updatedBy reference must be recorded');
+    return;
+  }
+  if (status.status === 'PASSED') {
+    assertEqual(status.remediationRequired, false, 'PASSED remediationRequired');
+    assertEqual(status.blockNextGroup, false, 'PASSED blockNextGroup');
+    assertEqual(status.currentCloudBaseState.colleges, 1, 'PASSED colleges count');
+    assertEqual(status.currentCloudBaseState.users, 3, 'PASSED users count');
+    assertEqual(status.currentCloudBaseState.risk_rules, 1, 'PASSED risk_rules count');
+    assertEqual(status.knownIssue, null, 'PASSED knownIssue');
+    return;
+  }
+  fail(`Unsupported A-group implementation status: ${status.status}`);
 }
 
 function validatePlan(plan = readPlan(), options = {}) {
@@ -364,7 +379,9 @@ function validatePlan(plan = readPlan(), options = {}) {
   const riskRules = collectionByName(plan, 'risk_rules');
   const runtimeSecuritySeed = Object.prototype.hasOwnProperty.call(options, 'runtimeSecuritySeed')
     ? options.runtimeSecuritySeed
-    : readRuntimeSecuritySeed(options.requireRuntimeSecuritySeed === true);
+    : options.requireRuntimeSecuritySeed === true
+      ? readRuntimeSecuritySeed(true)
+      : null;
   validateColleges(colleges);
   validateUsers(users, runtimeSecuritySeed);
   validateRiskRules(riskRules, runtimeSecuritySeed || users.seedData.runtimePasswordInitialization.securityAccountDocument);
@@ -376,10 +393,10 @@ function validatePlan(plan = readPlan(), options = {}) {
 if (require.main === module) {
   try {
     const requireRuntimeSecuritySeed = process.argv.includes('--require-runtime-security-seed');
-    validatePlan(undefined, { requireRuntimeSecuritySeed });
+    const plan = validatePlan(undefined, { requireRuntimeSecuritySeed });
     console.log(requireRuntimeSecuritySeed
       ? 'A-group runtime security seed validation passed'
-      : 'A-group plan validation passed (PARTIAL: runtime security seed required before risk_rules deployment)');
+      : `A-group static plan validation passed (${plan.implementationStatus.status})`);
   } catch (error) {
     console.error(`A-group plan validation failed: ${error.message}`);
     process.exit(1);

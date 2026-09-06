@@ -1,22 +1,22 @@
-A-GROUP REMEDIATION INSTRUCTIONS
+A-GROUP RECOVERY / RE-VERIFICATION INSTRUCTIONS
 
 Only permitted environment: aa-d4gvb4o3t50fc94f8
-Current status: PARTIAL / remediation required.
-Known dangling reference: risk_rules.rule_default.updatedBy references usr_security_demo_001, but that security user does not yet exist.
-This remediation may only create the missing security user and perform read-only verification of risk_rules/rule_default.
+Current status: PASSED.
+Known issue: none.
+A group has passed. This procedure is only for idempotent recovery and read-only re-verification.
 Do not update, delete, rebuild, or otherwise modify risk_rules/rule_default or any risk_rules field.
 Do not create __probe__, test, temp, probe, or any other collection. Do not test CloudBase capabilities by creating a collection.
 Do not modify colleges or the existing student/counselor users. If actual validation finds a conflict with DATABASE-DESIGN-v0.2, STOP and report it.
 On any failure: STOP.
 
 1. Confirm the environment is aa-d4gvb4o3t50fc94f8.
-2. Read .runtime/security-seed.json. Do not log its contents.
-3. Create users/usr_security_demo_001 from that runtime seed only. Convert createdAt and updatedAt serverTimestamp markers to CloudBase Date/current server time before insertion; never write the literal string serverTimestamp.
-4. Query risk_rules/rule_default. Verify updatedBy=usr_security_demo_001 and every rule_default field matches plan.json. If any field differs, STOP and report it; do not modify risk_rules.
-5. Query users/usr_security_demo_001. Verify role=security, identityKey=security:security01, wxIdentityKey=unbound:usr_security_demo_001, wxOpenId=null, bindStatus=not_applicable, status=active, version=1, createdAt and updatedAt are CloudBase Date values, and passwordHash is a non-empty bcrypt cost-12 hash without a placeholder.
-6. After the database read validation succeeds, delete local .runtime/security-seed.json. The runtime seed must not be retained for final verification.
-7. Query users and verify count=3.
-8. Query risk_rules and verify count=1.
-9. Verify rule_default.updatedBy references the existing users/usr_security_demo_001 document and that its role is security.
-10. Run the final read-only verification after runtime seed cleanup. Perform no operation on any other collection.
-11. Record the result as remediation complete only after every verification succeeds; otherwise retain PARTIAL / remediation required.
+2. Query users/usr_security_demo_001 before reading any runtime seed.
+3. If that security user exists, verify role=security, identityKey=security:security01, wxIdentityKey=unbound:usr_security_demo_001, wxOpenId=null, bindStatus=not_applicable, status=active, version=1, createdAt and updatedAt are CloudBase Date values, and passwordHash is a non-empty bcrypt cost-12 hash without a placeholder. If every check passes, SKIP creation and do not require a runtime seed. If any check fails, STOP and report it; do not overwrite the user.
+4. Only if users/usr_security_demo_001 is absent, read .runtime/security-seed.json. Do not log its contents. Create the user from that runtime seed only, converting createdAt and updatedAt serverTimestamp markers to CloudBase Date/current server time before insertion; never write the literal string serverTimestamp.
+5. Query risk_rules/rule_default. Verify updatedBy=usr_security_demo_001 and every rule_default field matches plan.json. If any field differs, STOP and report it; do not modify risk_rules.
+6. Query users and verify count=3.
+7. Query risk_rules and verify count=1.
+8. Verify rule_default.updatedBy references the existing users/usr_security_demo_001 document and that its role is security.
+9. If a runtime seed was used to create the security user, delete local .runtime/security-seed.json after the database read validation succeeds. Its absence must not affect final verification.
+10. Run the final read-only verification. Perform no operation on any other collection.
+11. Keep PASSED only after every verification succeeds; otherwise STOP and report the conflict without automatic repair.

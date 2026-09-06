@@ -6,15 +6,15 @@
   ],
   "envId": "aa-d4gvb4o3t50fc94f8",
   "implementationStatus": {
-    "status": "PARTIAL",
-    "remediationRequired": true,
-    "blockNextGroup": true,
+    "status": "PASSED",
+    "remediationRequired": false,
+    "blockNextGroup": false,
     "currentCloudBaseState": {
       "colleges": 1,
-      "users": 2,
+      "users": 3,
       "risk_rules": 1
     },
-    "knownIssue": "risk_rules.rule_default.updatedBy references usr_security_demo_001, but that security user does not yet exist."
+    "knownIssue": null
   },
   "creationOrder": [
     "colleges",

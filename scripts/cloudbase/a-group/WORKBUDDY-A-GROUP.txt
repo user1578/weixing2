@@ -1,29 +1,30 @@
 A-GROUP CLOUDBASE IMPLEMENTATION INSTRUCTIONS
 
 Only permitted environment: aa-d4gvb4o3t50fc94f8
-Current deployment status: PARTIAL / remediation required
-Known issue: risk_rules.rule_default.updatedBy references usr_security_demo_001, but that security user does not yet exist.
-Do not mark A group as passed and do not enter B group until remediation and read-only verification succeed.
+Current deployment status: PASSED
+Known issue: none.
+A group has passed read-only acceptance. This material is for idempotent recovery and re-verification only.
 Do not run any command against another environment.
 Do not change the frozen design, collection names, fields, indexes, seed data, or security requirements.
 Do not add or remove collections or indexes.
 Never create collections named __probe__, test, temp, or probe, and never create any A-group-external collection to test CloudBase capabilities.
 Capability validation may only be non-destructive against existing A-group resources. If that is not possible, STOP and report the capability as unknown.
+Idempotent recovery rule: query every target resource before creation. If it exists and fully matches the frozen design, verify it and SKIP creation. If it exists but differs, STOP and report it; never overwrite it automatically. Only create an absent target resource according to the approved plan.
 On any failure: STOP. Do not improvise a substitute and do not continue to the next collection.
 
-Required execution order:
+Initial deployment order (only for absent resources):
 1. create and initialize colleges
 2. initialize student and counselor users
 3. create runtime security user from .runtime/security-seed.json
 4. initialize risk_rules only after the security user exists and is verified
 
 For each collection, complete every step in this order before continuing:
-1. Create the collection in the permitted environment.
-2. Create exactly the listed indexes.
-3. Set the listed security policy: client read=false and client write=false.
-4. Initialize exactly the listed data, using CloudBase server Date/serverDate for every serverTimestamp marker.
-5. Query the collection to verify the inserted data.
-6. Check the document count, index definitions, and all key fields.
+1. Query the collection, indexes, ACL, and listed document IDs.
+2. If the existing resource fully matches the frozen design, verify it and SKIP creation.
+3. If an existing resource differs from the frozen design, STOP and report it without overwriting data, indexes, or ACL.
+4. Only when the target resource is absent, create exactly the listed collection, indexes, ACL, and data.
+5. Convert every serverTimestamp marker to CloudBase server Date/serverDate before writing.
+6. Query the collection to verify document counts, index definitions, ACL, and all key fields.
 7. Continue only after all checks succeed.
 
 COLLECTION: colleges
@@ -139,7 +140,8 @@ Validation after initialization:
 - Confirm client read and client write are both denied for users.
 - Confirm identityKey and wxIdentityKey are non-null, non-empty, unique, and match their required formats.
 - Do not create UNIQUE indexes for wxOpenId, studentNo, staffNo, or loginName.
-- Create the security account only from .runtime/security-seed.json after prepare-security-seed.js completes successfully.
+- Query users/usr_security_demo_001 before reading .runtime/security-seed.json. If it exists and fully matches the frozen design, SKIP creation; do not trigger duplicate insert/E11000. If it differs, STOP and report it without overwriting the user.
+- Only if users/usr_security_demo_001 is absent, create it from .runtime/security-seed.json after prepare-security-seed.js completes successfully.
 - Before inserting users/usr_security_demo_001, convert createdAt and updatedAt serverTimestamp markers to CloudBase Date/current server time. Never write the literal string serverTimestamp to CloudBase.
 - The supplied passwordHash must use bcryptjs with cost factor 12; do not store clear-text credentials or a sample hash.
 
@@ -178,12 +180,13 @@ Validation after initialization:
 - Confirm client read and client write are both denied for risk_rules.
 - Before initializing rule_default in a new environment, query users and confirm users._id=usr_security_demo_001 exists and role=security.
 - If the runtime security seed is missing, invalid, or not present in users, A group is INCOMPLETE: STOP and do not write risk_rules.
+- During recovery or re-verification, risk_rules/rule_default is read-only: do not update, delete, rebuild, or otherwise modify it. If it is missing or differs from the plan, STOP and report it.
 - rule_default.updatedBy must equal usr_security_demo_001 and reference that existing security user.
 - Confirm exactly one document exists and its _id is rule_default.
 - Confirm all six numeric defaults and all four keyFraudTypes exactly match the initialization data.
 
 Final A-group verification:
-- Confirm the current result is not marked passed until the missing security user exists and read-only reference verification succeeds.
+- Confirm the PASSED status remains supported by the current read-only verification results; do not require a deleted runtime seed.
 - Confirm exactly these three A-group collections were handled: colleges, users, risk_rules.
 - Confirm the A-group index total is exactly 3, all on users.
 - Run the supplied read-only verification script in an authenticated environment.
