@@ -1,0 +1,41 @@
+A-GROUP REMEDIATION INSTRUCTIONS
+
+Only permitted environment: aa-d4gvb4o3t50fc94f8
+Current status: PARTIAL / remediation required.
+Known dangling reference: risk_rules.rule_default.updatedBy references usr_security_demo_001, but that security user does not yet exist.
+This remediation may only create the missing security user and repair or rebuild risk_rules/rule_default as specified below.
+Do not create __probe__, test, temp, probe, or any other collection. Do not test CloudBase capabilities by creating a collection.
+Do not modify colleges or the existing student/counselor users. If actual validation finds a conflict with DATABASE-DESIGN-v0.2, STOP and report it.
+On any failure: STOP.
+
+1. Confirm the environment is aa-d4gvb4o3t50fc94f8.
+2. Read .runtime/security-seed.json. Do not log its contents.
+3. Create users/usr_security_demo_001 from that runtime seed only.
+4. Query that user and verify role=security, identityKey=security:security01, wxIdentityKey=unbound:usr_security_demo_001, wxOpenId=null, bindStatus=not_applicable, status=active, version=1, and a bcrypt cost-12 passwordHash. Verify no clear-text credential field exists.
+5. Repair risk_rules/rule_default so updatedBy=usr_security_demo_001. Preserve all frozen rule fields. If a safe repair is unavailable, rebuild only rule_default with this exact document and server timestamps:
+{
+  "_id": "rule_default",
+  "name": "第一版默认风险规则",
+  "status": "enabled",
+  "highAmount": 5000,
+  "midAmountMin": 1,
+  "repeatAlertWindowDays": 30,
+  "highAlertRepeatCount": 3,
+  "midAlertRepeatCount": 2,
+  "slaFirstFollowHours": 48,
+  "keyFraudTypes": [
+    "part_time_scam",
+    "impersonate_public",
+    "fake_loan",
+    "fake_refund"
+  ],
+  "updatedBy": "usr_security_demo_001",
+  "version": 1,
+  "createdAt": "serverTimestamp",
+  "updatedAt": "serverTimestamp"
+}
+6. Query users and verify count=3.
+7. Query risk_rules and verify count=1.
+8. Query rule_default.updatedBy and users/usr_security_demo_001 together; verify the reference exists and the target role is security.
+9. Perform no operation on any other collection.
+10. Record the result as remediation complete only after every verification succeeds; otherwise retain PARTIAL / remediation required.

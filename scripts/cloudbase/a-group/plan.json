@@ -1,0 +1,381 @@
+{
+  "sourceOfTruth": [
+    "SRS-v0.2",
+    "DATABASE-DESIGN-v0.2",
+    "CLOUDBASE-DEVELOPMENT-GUARDRAILS"
+  ],
+  "envId": "aa-d4gvb4o3t50fc94f8",
+  "implementationStatus": {
+    "status": "PARTIAL",
+    "remediationRequired": true,
+    "blockNextGroup": true,
+    "currentCloudBaseState": {
+      "colleges": 1,
+      "users": 2,
+      "risk_rules": 1
+    },
+    "knownIssue": "risk_rules.rule_default.updatedBy references usr_security_demo_001, but that security user does not yet exist."
+  },
+  "creationOrder": [
+    "colleges",
+    "users",
+    "risk_rules"
+  ],
+  "executionSequence": [
+    {
+      "step": 1,
+      "collectionName": "colleges",
+      "operation": "create and initialize colleges"
+    },
+    {
+      "step": 2,
+      "collectionName": "users",
+      "operation": "initialize student and counselor users"
+    },
+    {
+      "step": 3,
+      "collectionName": "users",
+      "operation": "create runtime security user from .runtime/security-seed.json"
+    },
+    {
+      "step": 4,
+      "collectionName": "risk_rules",
+      "operation": "initialize risk_rules only after the security user exists and is verified"
+    }
+  ],
+  "collections": [
+    {
+      "collectionName": "colleges",
+      "fields": [
+        "_id",
+        "name",
+        "status",
+        "aliases",
+        "createdAt",
+        "updatedAt"
+      ],
+      "indexes": [],
+      "uniqueIndexes": [],
+      "seedData": {
+        "documents": [
+          {
+            "_id": "college_cs",
+            "name": "计算机学院",
+            "status": "active",
+            "aliases": [
+              "计算机",
+              "计院"
+            ],
+            "createdAt": "serverTimestamp",
+            "updatedAt": "serverTimestamp"
+          }
+        ]
+      },
+      "securityPolicy": {
+        "clientRead": false,
+        "clientWrite": false,
+        "requirement": "All client database reads and writes must be denied; access is only through controlled server functions."
+      },
+      "validationRules": {
+        "requiredFields": [
+          "_id",
+          "name",
+          "status",
+          "aliases",
+          "createdAt",
+          "updatedAt"
+        ],
+        "idFormat": "college_<stable_identifier>",
+        "statusEnum": [
+          "active",
+          "disabled"
+        ],
+        "timeFields": [
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    },
+    {
+      "collectionName": "users",
+      "fields": [
+        "_id",
+        "identityKey",
+        "wxIdentityKey",
+        "role",
+        "name",
+        "collegeId",
+        "studentNo",
+        "staffNo",
+        "loginName",
+        "passwordHash",
+        "wxOpenId",
+        "bindStatus",
+        "mobile",
+        "focusFlag",
+        "focusReason",
+        "status",
+        "version",
+        "createdAt",
+        "updatedAt"
+      ],
+      "indexes": [
+        {
+          "name": "collegeId_focusFlag_status",
+          "fields": [
+            {
+              "field": "collegeId",
+              "order": "asc"
+            },
+            {
+              "field": "focusFlag",
+              "order": "asc"
+            },
+            {
+              "field": "status",
+              "order": "asc"
+            }
+          ],
+          "unique": false
+        }
+      ],
+      "uniqueIndexes": [
+        {
+          "name": "identityKey_unique",
+          "fields": [
+            "identityKey"
+          ],
+          "requiredNonNullFields": [
+            "identityKey"
+          ]
+        },
+        {
+          "name": "wxIdentityKey_unique",
+          "fields": [
+            "wxIdentityKey"
+          ],
+          "requiredNonNullFields": [
+            "wxIdentityKey"
+          ]
+        }
+      ],
+      "seedData": {
+        "documents": [
+          {
+            "_id": "usr_student_demo_001",
+            "identityKey": "student:2026000001",
+            "wxIdentityKey": "unbound:usr_student_demo_001",
+            "role": "student",
+            "name": "演示学生",
+            "collegeId": "college_cs",
+            "studentNo": "2026000001",
+            "staffNo": null,
+            "loginName": null,
+            "passwordHash": null,
+            "wxOpenId": null,
+            "bindStatus": "unbound",
+            "mobile": null,
+            "focusFlag": false,
+            "focusReason": null,
+            "status": "active",
+            "version": 1,
+            "createdAt": "serverTimestamp",
+            "updatedAt": "serverTimestamp"
+          },
+          {
+            "_id": "usr_counselor_demo_001",
+            "identityKey": "counselor:T00001",
+            "wxIdentityKey": "unbound:usr_counselor_demo_001",
+            "role": "counselor",
+            "name": "演示辅导员",
+            "collegeId": "college_cs",
+            "studentNo": null,
+            "staffNo": "T00001",
+            "loginName": null,
+            "passwordHash": null,
+            "wxOpenId": null,
+            "bindStatus": "unbound",
+            "mobile": null,
+            "focusFlag": false,
+            "focusReason": null,
+            "status": "active",
+            "version": 1,
+            "createdAt": "serverTimestamp",
+            "updatedAt": "serverTimestamp"
+          }
+        ],
+        "runtimePasswordInitialization": {
+          "requiresRuntimePasswordInitialization": true,
+          "runtimeSeedPath": ".runtime/security-seed.json",
+          "sourceEnvironmentVariable": "DEMO_SECURITY_PASSWORD",
+          "passwordHashAlgorithm": "bcrypt",
+          "passwordHashLibrary": "bcryptjs",
+          "passwordHashCost": 12,
+          "securityAccountDocument": {
+            "_id": "usr_security_demo_001",
+            "identityKey": "security:security01",
+            "wxIdentityKey": "unbound:usr_security_demo_001",
+            "role": "security",
+            "name": "演示保卫处账号",
+            "collegeId": null,
+            "studentNo": null,
+            "staffNo": null,
+            "loginName": "security01",
+            "wxOpenId": null,
+            "bindStatus": "not_applicable",
+            "mobile": null,
+            "focusFlag": false,
+            "focusReason": null,
+            "status": "active",
+            "version": 1,
+            "createdAt": "serverTimestamp",
+            "updatedAt": "serverTimestamp"
+          },
+          "requiredFieldsAtWriteTime": [
+            "passwordHash"
+          ],
+          "failureBehavior": "Mark A group INCOMPLETE and stop before writing risk_rules when the runtime security seed is absent or invalid."
+        }
+      },
+      "securityPolicy": {
+        "clientRead": false,
+        "clientWrite": false,
+        "requirement": "All client database reads and writes must be denied; access is only through controlled server functions."
+      },
+      "validationRules": {
+        "requiredFields": [
+          "_id",
+          "identityKey",
+          "wxIdentityKey",
+          "role",
+          "name",
+          "collegeId",
+          "studentNo",
+          "staffNo",
+          "loginName",
+          "passwordHash",
+          "wxOpenId",
+          "bindStatus",
+          "mobile",
+          "focusFlag",
+          "focusReason",
+          "status",
+          "version",
+          "createdAt",
+          "updatedAt"
+        ],
+        "roleEnum": [
+          "student",
+          "counselor",
+          "security"
+        ],
+        "bindStatusEnum": [
+          "unbound",
+          "bound",
+          "not_applicable"
+        ],
+        "statusEnum": [
+          "active",
+          "graduated",
+          "suspended"
+        ],
+        "identityKeyFormats": [
+          "student:<studentNo>",
+          "counselor:<staffNo>",
+          "security:<loginName>"
+        ],
+        "wxIdentityKeyFormats": [
+          "unbound:<users._id>",
+          "openid:<OPENID>"
+        ],
+        "timeFields": [
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    },
+    {
+      "collectionName": "risk_rules",
+      "fields": [
+        "_id",
+        "name",
+        "status",
+        "highAmount",
+        "midAmountMin",
+        "repeatAlertWindowDays",
+        "highAlertRepeatCount",
+        "midAlertRepeatCount",
+        "slaFirstFollowHours",
+        "keyFraudTypes",
+        "updatedBy",
+        "version",
+        "createdAt",
+        "updatedAt"
+      ],
+      "indexes": [],
+      "uniqueIndexes": [],
+      "seedData": {
+        "documents": [
+          {
+            "_id": "rule_default",
+            "name": "第一版默认风险规则",
+            "status": "enabled",
+            "highAmount": 5000,
+            "midAmountMin": 1,
+            "repeatAlertWindowDays": 30,
+            "highAlertRepeatCount": 3,
+            "midAlertRepeatCount": 2,
+            "slaFirstFollowHours": 48,
+            "keyFraudTypes": [
+              "part_time_scam",
+              "impersonate_public",
+              "fake_loan",
+              "fake_refund"
+            ],
+            "updatedBy": "usr_security_demo_001",
+            "version": 1,
+            "createdAt": "serverTimestamp",
+            "updatedAt": "serverTimestamp"
+          }
+        ]
+      },
+      "securityPolicy": {
+        "clientRead": false,
+        "clientWrite": false,
+        "requirement": "All client database reads and writes must be denied; access is only through controlled server functions."
+      },
+      "validationRules": {
+        "requiredFields": [
+          "_id",
+          "name",
+          "status",
+          "highAmount",
+          "midAmountMin",
+          "repeatAlertWindowDays",
+          "highAlertRepeatCount",
+          "midAlertRepeatCount",
+          "slaFirstFollowHours",
+          "keyFraudTypes",
+          "updatedBy",
+          "version",
+          "createdAt",
+          "updatedAt"
+        ],
+        "singletonId": "rule_default",
+        "statusEnum": [
+          "enabled"
+        ],
+        "keyFraudTypesEnum": [
+          "part_time_scam",
+          "impersonate_public",
+          "fake_loan",
+          "fake_refund"
+        ],
+        "timeFields": [
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    }
+  ]
+}

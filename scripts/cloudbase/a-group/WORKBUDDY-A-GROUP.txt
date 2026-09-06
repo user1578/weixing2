@@ -1,0 +1,188 @@
+A-GROUP CLOUDBASE IMPLEMENTATION INSTRUCTIONS
+
+Only permitted environment: aa-d4gvb4o3t50fc94f8
+Current deployment status: PARTIAL / remediation required
+Known issue: risk_rules.rule_default.updatedBy references usr_security_demo_001, but that security user does not yet exist.
+Do not mark A group as passed and do not enter B group until remediation and read-only verification succeed.
+Do not run any command against another environment.
+Do not change the frozen design, collection names, fields, indexes, seed data, or security requirements.
+Do not add or remove collections or indexes.
+Never create collections named __probe__, test, temp, or probe, and never create any A-group-external collection to test CloudBase capabilities.
+Capability validation may only be non-destructive against existing A-group resources. If that is not possible, STOP and report the capability as unknown.
+On any failure: STOP. Do not improvise a substitute and do not continue to the next collection.
+
+Required execution order:
+1. create and initialize colleges
+2. initialize student and counselor users
+3. create runtime security user from .runtime/security-seed.json
+4. initialize risk_rules only after the security user exists and is verified
+
+For each collection, complete every step in this order before continuing:
+1. Create the collection in the permitted environment.
+2. Create exactly the listed indexes.
+3. Set the listed security policy: client read=false and client write=false.
+4. Initialize exactly the listed data, using CloudBase server Date/serverDate for every serverTimestamp marker.
+5. Query the collection to verify the inserted data.
+6. Check the document count, index definitions, and all key fields.
+7. Continue only after all checks succeed.
+
+COLLECTION: colleges
+Fields: _id, name, status, aliases, createdAt, updatedAt
+Indexes:
+- No additional indexes.
+Security policy:
+- Client read: false
+- Client write: false
+- All client database reads and writes must be denied; access is only through controlled server functions.
+Initialization data:
+{
+  "_id": "college_cs",
+  "name": "计算机学院",
+  "status": "active",
+  "aliases": [
+    "计算机",
+    "计院"
+  ],
+  "createdAt": "serverTimestamp",
+  "updatedAt": "serverTimestamp"
+}
+Validation after initialization:
+- Query colleges; confirm each listed document and required field.
+- Confirm client read and client write are both denied for colleges.
+
+COLLECTION: users
+Fields: _id, identityKey, wxIdentityKey, role, name, collegeId, studentNo, staffNo, loginName, passwordHash, wxOpenId, bindStatus, mobile, focusFlag, focusReason, status, version, createdAt, updatedAt
+Indexes:
+- UNIQUE identityKey_unique: identityKey; every field is required, non-null, and non-empty.
+- UNIQUE wxIdentityKey_unique: wxIdentityKey; every field is required, non-null, and non-empty.
+- collegeId_focusFlag_status: collegeId asc, focusFlag asc, status asc.
+Security policy:
+- Client read: false
+- Client write: false
+- All client database reads and writes must be denied; access is only through controlled server functions.
+Initialization data:
+{
+  "_id": "usr_student_demo_001",
+  "identityKey": "student:2026000001",
+  "wxIdentityKey": "unbound:usr_student_demo_001",
+  "role": "student",
+  "name": "演示学生",
+  "collegeId": "college_cs",
+  "studentNo": "2026000001",
+  "staffNo": null,
+  "loginName": null,
+  "passwordHash": null,
+  "wxOpenId": null,
+  "bindStatus": "unbound",
+  "mobile": null,
+  "focusFlag": false,
+  "focusReason": null,
+  "status": "active",
+  "version": 1,
+  "createdAt": "serverTimestamp",
+  "updatedAt": "serverTimestamp"
+}
+{
+  "_id": "usr_counselor_demo_001",
+  "identityKey": "counselor:T00001",
+  "wxIdentityKey": "unbound:usr_counselor_demo_001",
+  "role": "counselor",
+  "name": "演示辅导员",
+  "collegeId": "college_cs",
+  "studentNo": null,
+  "staffNo": "T00001",
+  "loginName": null,
+  "passwordHash": null,
+  "wxOpenId": null,
+  "bindStatus": "unbound",
+  "mobile": null,
+  "focusFlag": false,
+  "focusReason": null,
+  "status": "active",
+  "version": 1,
+  "createdAt": "serverTimestamp",
+  "updatedAt": "serverTimestamp"
+}
+{
+  "securityAccountDocument": {
+    "_id": "usr_security_demo_001",
+    "identityKey": "security:security01",
+    "wxIdentityKey": "unbound:usr_security_demo_001",
+    "role": "security",
+    "name": "演示保卫处账号",
+    "collegeId": null,
+    "studentNo": null,
+    "staffNo": null,
+    "loginName": "security01",
+    "wxOpenId": null,
+    "bindStatus": "not_applicable",
+    "mobile": null,
+    "focusFlag": false,
+    "focusReason": null,
+    "status": "active",
+    "version": 1,
+    "createdAt": "serverTimestamp",
+    "updatedAt": "serverTimestamp"
+  },
+  "requiredFieldsAtWriteTime": [
+    "passwordHash"
+  ],
+  "requiresRuntimePasswordInitialization": true,
+  "runtimeSeedPath": ".runtime/security-seed.json",
+  "passwordHashLibrary": "bcryptjs",
+  "passwordHashAlgorithm": "bcrypt",
+  "passwordHashCost": 12,
+  "failureBehavior": "Mark A group INCOMPLETE and stop before writing risk_rules when the runtime security seed is absent or invalid."
+}
+Validation after initialization:
+- Query users; confirm each listed document and required field.
+- Confirm client read and client write are both denied for users.
+- Confirm identityKey and wxIdentityKey are non-null, non-empty, unique, and match their required formats.
+- Do not create UNIQUE indexes for wxOpenId, studentNo, staffNo, or loginName.
+- Create the security account only from .runtime/security-seed.json after prepare-security-seed.js completes successfully.
+- The supplied passwordHash must use bcryptjs with cost factor 12; do not store clear-text credentials or a sample hash.
+
+COLLECTION: risk_rules
+Fields: _id, name, status, highAmount, midAmountMin, repeatAlertWindowDays, highAlertRepeatCount, midAlertRepeatCount, slaFirstFollowHours, keyFraudTypes, updatedBy, version, createdAt, updatedAt
+Indexes:
+- No additional indexes.
+Security policy:
+- Client read: false
+- Client write: false
+- All client database reads and writes must be denied; access is only through controlled server functions.
+Initialization data:
+{
+  "_id": "rule_default",
+  "name": "第一版默认风险规则",
+  "status": "enabled",
+  "highAmount": 5000,
+  "midAmountMin": 1,
+  "repeatAlertWindowDays": 30,
+  "highAlertRepeatCount": 3,
+  "midAlertRepeatCount": 2,
+  "slaFirstFollowHours": 48,
+  "keyFraudTypes": [
+    "part_time_scam",
+    "impersonate_public",
+    "fake_loan",
+    "fake_refund"
+  ],
+  "updatedBy": "usr_security_demo_001",
+  "version": 1,
+  "createdAt": "serverTimestamp",
+  "updatedAt": "serverTimestamp"
+}
+Validation after initialization:
+- Query risk_rules; confirm each listed document and required field.
+- Confirm client read and client write are both denied for risk_rules.
+- Before writing or repairing rule_default, query users and confirm users._id=usr_security_demo_001 exists and role=security.
+- If the runtime security seed is missing, invalid, or not present in users, A group is INCOMPLETE: STOP and do not write risk_rules.
+- rule_default.updatedBy must equal usr_security_demo_001 and reference that existing security user.
+- Confirm exactly one document exists and its _id is rule_default.
+- Confirm all six numeric defaults and all four keyFraudTypes exactly match the initialization data.
+
+Final A-group verification:
+- Confirm the current result is not marked passed until the known dangling updatedBy reference is repaired.
+- Confirm exactly these three A-group collections were handled: colleges, users, risk_rules.
+- Confirm the A-group index total is exactly 3, all on users.
+- Run the supplied read-only verification script in an authenticated environment.

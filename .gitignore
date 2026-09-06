@@ -28,6 +28,7 @@ build/
 .cloudbase/
 cloudbaserc.json
 .cloudbaserc
+scripts/cloudbase/**/.runtime/
 
 # ---- 环境变量与密钥 ----
 .env

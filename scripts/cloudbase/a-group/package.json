@@ -1,0 +1,9 @@
+{
+  "name": "campus-anti-fraud-a-group-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Local-only A-group implementation utilities",
+  "dependencies": {
+    "bcryptjs": "2.4.3"
+  }
+}
