@@ -35,6 +35,43 @@ page {
   margin-bottom: 28rpx;
 }
 
+.ping_test {
+  width: 93%;
+  box-sizing: border-box;
+  padding: 28rpx 25rpx;
+  border-radius: 5px;
+  background-color: #fff;
+}
+
+.ping_test_title {
+  font-size: 32rpx;
+  color: #000;
+  margin-bottom: 20rpx;
+}
+
+.ping_test_button {
+  margin: 0;
+  background-color: #07c160;
+  color: #fff;
+  font-size: 28rpx;
+}
+
+.ping_result,
+.ping_error {
+  margin-top: 20rpx;
+  font-size: 26rpx;
+  line-height: 1.8;
+  word-break: break-all;
+}
+
+.ping_result {
+  color: #07c160;
+}
+
+.ping_error {
+  color: #d93025;
+}
+
 .examples_container {
   display: flex;
   flex-direction: column;

@@ -82,7 +82,41 @@ Page({
     haveCreateCollection: false,
     title: "",
     content: "",
+    pingResult: null,
+    pingError: null,
   },
+
+  testCloudbaseConnection() {
+    wx.showLoading({
+      title: "连接中",
+      mask: true,
+    });
+    wx.cloud
+      .callFunction({
+        name: "ping",
+      })
+      .then((response) => {
+        console.log("ping 云函数调用成功", response);
+        const { ok, message, envId } = response.result || {};
+        this.setData({
+          pingResult: { ok, message, envId },
+          pingError: null,
+        });
+        wx.hideLoading();
+      })
+      .catch((error) => {
+        console.error("ping 云函数调用失败", error);
+        this.setData({
+          pingResult: null,
+          pingError: {
+            errCode: error.errCode,
+            errMsg: error.errMsg,
+          },
+        });
+        wx.hideLoading();
+      });
+  },
+
   onClickPowerInfo(e) {
     const app = getApp();
     const index = e.currentTarget.dataset.index;

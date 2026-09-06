@@ -44,6 +44,9 @@ credentials/
 *.log
 logs/
 
+# ---- WorkBuddy 本地工作区、记忆与日志 ----
+.workbuddy/
+
 # ---- OS ----
 .DS_Store
 Thumbs.db

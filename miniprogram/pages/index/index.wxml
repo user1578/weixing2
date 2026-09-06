@@ -2,6 +2,20 @@
 <view class="container">
   <view class="title">快速了解云开发</view>
   <view class="top_tip">免鉴权接口调用 免部署后台 高并发</view>
+  <view class="ping_test">
+    <view class="ping_test_title">CloudBase 联通测试</view>
+    <button class="ping_test_button" bindtap="testCloudbaseConnection">测试CloudBase连接</button>
+    <view class="ping_result" wx:if="{{pingResult}}">
+      <view>ok：{{pingResult.ok}}</view>
+      <view>message：{{pingResult.message}}</view>
+      <view>envId：{{pingResult.envId}}</view>
+    </view>
+    <view class="ping_error" wx:if="{{pingError}}">
+      <view>调用失败</view>
+      <view>errCode：{{pingError.errCode}}</view>
+      <view>errMsg：{{pingError.errMsg}}</view>
+    </view>
+  </view>
   <view class="power" wx:key="title" wx:for="{{powerList}}" wx:for-item="power">
     <view class="power_info" data-index="{{index}}" data-type="{{ power.type }}" bindtap="onClickPowerInfo">
       <view class="power_info_text">
