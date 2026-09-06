@@ -140,6 +140,7 @@ Validation after initialization:
 - Confirm identityKey and wxIdentityKey are non-null, non-empty, unique, and match their required formats.
 - Do not create UNIQUE indexes for wxOpenId, studentNo, staffNo, or loginName.
 - Create the security account only from .runtime/security-seed.json after prepare-security-seed.js completes successfully.
+- Before inserting users/usr_security_demo_001, convert createdAt and updatedAt serverTimestamp markers to CloudBase Date/current server time. Never write the literal string serverTimestamp to CloudBase.
 - The supplied passwordHash must use bcryptjs with cost factor 12; do not store clear-text credentials or a sample hash.
 
 COLLECTION: risk_rules
@@ -175,14 +176,14 @@ Initialization data:
 Validation after initialization:
 - Query risk_rules; confirm each listed document and required field.
 - Confirm client read and client write are both denied for risk_rules.
-- Before writing or repairing rule_default, query users and confirm users._id=usr_security_demo_001 exists and role=security.
+- Before initializing rule_default in a new environment, query users and confirm users._id=usr_security_demo_001 exists and role=security.
 - If the runtime security seed is missing, invalid, or not present in users, A group is INCOMPLETE: STOP and do not write risk_rules.
 - rule_default.updatedBy must equal usr_security_demo_001 and reference that existing security user.
 - Confirm exactly one document exists and its _id is rule_default.
 - Confirm all six numeric defaults and all four keyFraudTypes exactly match the initialization data.
 
 Final A-group verification:
-- Confirm the current result is not marked passed until the known dangling updatedBy reference is repaired.
+- Confirm the current result is not marked passed until the missing security user exists and read-only reference verification succeeds.
 - Confirm exactly these three A-group collections were handled: colleges, users, risk_rules.
 - Confirm the A-group index total is exactly 3, all on users.
 - Run the supplied read-only verification script in an authenticated environment.

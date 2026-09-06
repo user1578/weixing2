@@ -40,6 +40,10 @@ function validatePassword(password) {
   if (typeof password !== 'string' || password.length < 12) {
     fail('DEMO_SECURITY_PASSWORD must contain at least 12 characters');
   }
+  const passwordBytes = Buffer.byteLength(password, 'utf8');
+  if (passwordBytes > 72) {
+    fail('DEMO_SECURITY_PASSWORD must not exceed 72 UTF-8 bytes for bcrypt');
+  }
   const normalized = password.toLowerCase();
   for (const forbiddenValue of ['password', '123456', 'demo_password_placeholder']) {
     if (normalized.includes(forbiddenValue)) {

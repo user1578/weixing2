@@ -14,7 +14,6 @@ const path = require('path');
 const { validatePlan } = require('./validate-plan');
 
 const PLAN_PATH = path.join(__dirname, 'plan.json');
-const RUNTIME_SEED_PATH = path.join(__dirname, '.runtime', 'security-seed.json');
 const ENV_ID = 'aa-d4gvb4o3t50fc94f8';
 const BCRYPT_HASH_PATTERN = /^\$2[aby]\$12\$[./A-Za-z0-9]{53}$/;
 
@@ -24,13 +23,6 @@ function fail(message) {
 
 function loadPlan() {
   return JSON.parse(fs.readFileSync(PLAN_PATH, 'utf8'));
-}
-
-function loadRuntimeSecuritySeed() {
-  if (!fs.existsSync(RUNTIME_SEED_PATH)) {
-    fail('Runtime security seed is required at .runtime/security-seed.json');
-  }
-  return JSON.parse(fs.readFileSync(RUNTIME_SEED_PATH, 'utf8'));
 }
 
 function collectionByName(plan, name) {
@@ -51,11 +43,15 @@ function documentCount(collection) {
   return collection.seedData.documents.length;
 }
 
-function expectedUsers(users, runtimeSecuritySeed) {
+function expectedUsers(users) {
   return [
     ...users.seedData.documents,
-    runtimeSecuritySeed
+    users.seedData.runtimePasswordInitialization.securityAccountDocument
   ];
+}
+
+function assertActualDate(value, label) {
+  assert(value instanceof Date && !Number.isNaN(value.getTime()), `${label} must be a CloudBase Date value`);
 }
 
 async function verifyCollectionExists(db, name) {
@@ -77,7 +73,11 @@ async function verifyByIds(db, name, documents) {
     const actual = result.data && result.data[0];
     assert(actual, `${name}.${expected._id} is missing`);
     for (const [field, value] of Object.entries(expected)) {
-      if (field === 'createdAt' || field === 'updatedAt' || field === 'passwordHash') {
+      if (field === 'createdAt' || field === 'updatedAt') {
+        assertActualDate(actual[field], `${name}.${expected._id}.${field}`);
+        continue;
+      }
+      if (field === 'passwordHash') {
         continue;
       }
       assert(JSON.stringify(actual[field]) === JSON.stringify(value), `${name}.${expected._id}.${field} differs from plan.json`);
@@ -85,8 +85,8 @@ async function verifyByIds(db, name, documents) {
   }
 }
 
-async function verifyUsers(db, users, runtimeSecuritySeed) {
-  const expected = expectedUsers(users, runtimeSecuritySeed);
+async function verifyUsers(db, users) {
+  const expected = expectedUsers(users);
   await verifyCount(db, 'users', expected.length);
   await verifyByIds(db, 'users', expected);
 
@@ -101,7 +101,14 @@ async function verifyUsers(db, users, runtimeSecuritySeed) {
   assert(documents.every((document) => document.wxOpenId === null), 'A-group demo users must not contain bound wxOpenId values');
   const securityUser = documents.find((document) => document._id === 'usr_security_demo_001');
   assert(securityUser && securityUser.role === 'security', 'users/usr_security_demo_001 must exist with role=security');
-  assert(typeof securityUser.passwordHash === 'string' && BCRYPT_HASH_PATTERN.test(securityUser.passwordHash), 'security passwordHash must be a bcrypt cost-12 hash');
+  const securityTemplate = users.seedData.runtimePasswordInitialization.securityAccountDocument;
+  assert(securityUser.identityKey === securityTemplate.identityKey, 'security identityKey differs from plan.json');
+  assert(securityUser.wxIdentityKey === securityTemplate.wxIdentityKey, 'security wxIdentityKey differs from plan.json');
+  assert(securityUser.wxOpenId === null, 'security wxOpenId must be null');
+  assertActualDate(securityUser.createdAt, 'security createdAt');
+  assertActualDate(securityUser.updatedAt, 'security updatedAt');
+  assert(typeof securityUser.passwordHash === 'string' && securityUser.passwordHash.length > 0 && BCRYPT_HASH_PATTERN.test(securityUser.passwordHash), 'security passwordHash must be a non-empty bcrypt cost-12 hash');
+  assert(!/DEMO_PASSWORD_PLACEHOLDER/i.test(securityUser.passwordHash), 'security passwordHash must not contain a placeholder');
   return securityUser;
 }
 
@@ -113,6 +120,7 @@ async function verifyRiskRules(db, riskRules, securityUser) {
   const expected = riskRules.seedData.documents[0];
   for (const [field, value] of Object.entries(expected)) {
     if (field === 'createdAt' || field === 'updatedAt') {
+      assertActualDate(rule[field], `risk_rules.rule_default.${field}`);
       continue;
     }
     assert(JSON.stringify(rule[field]) === JSON.stringify(value), `risk_rules.rule_default.${field} differs from plan.json`);
@@ -123,8 +131,7 @@ async function verifyRiskRules(db, riskRules, securityUser) {
 
 async function main() {
   const plan = loadPlan();
-  const runtimeSecuritySeed = loadRuntimeSecuritySeed();
-  validatePlan(plan, { runtimeSecuritySeed, requireRuntimeSecuritySeed: true });
+  validatePlan(plan);
   const envId = process.argv[2] || plan.envId;
   assert(envId === ENV_ID, `envId must be ${ENV_ID}`);
   assert(plan.envId === ENV_ID, `plan.json envId must be ${ENV_ID}`);
@@ -147,7 +154,7 @@ async function main() {
   }
   await verifyCount(db, 'colleges', documentCount(colleges));
   await verifyByIds(db, 'colleges', colleges.seedData.documents);
-  const securityUser = await verifyUsers(db, users, runtimeSecuritySeed);
+  const securityUser = await verifyUsers(db, users);
   await verifyRiskRules(db, riskRules, securityUser);
   console.log('A-group deployment verification passed');
 }

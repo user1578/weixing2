@@ -104,10 +104,11 @@ function buildInstructions(plan) {
       sections.push('- Confirm identityKey and wxIdentityKey are non-null, non-empty, unique, and match their required formats.');
       sections.push('- Do not create UNIQUE indexes for wxOpenId, studentNo, staffNo, or loginName.');
       sections.push('- Create the security account only from .runtime/security-seed.json after prepare-security-seed.js completes successfully.');
+      sections.push('- Before inserting users/usr_security_demo_001, convert createdAt and updatedAt serverTimestamp markers to CloudBase Date/current server time. Never write the literal string serverTimestamp to CloudBase.');
       sections.push('- The supplied passwordHash must use bcryptjs with cost factor 12; do not store clear-text credentials or a sample hash.');
     }
     if (collection.collectionName === 'risk_rules') {
-      sections.push('- Before writing or repairing rule_default, query users and confirm users._id=usr_security_demo_001 exists and role=security.');
+      sections.push('- Before initializing rule_default in a new environment, query users and confirm users._id=usr_security_demo_001 exists and role=security.');
       sections.push('- If the runtime security seed is missing, invalid, or not present in users, A group is INCOMPLETE: STOP and do not write risk_rules.');
       sections.push('- rule_default.updatedBy must equal usr_security_demo_001 and reference that existing security user.');
       sections.push('- Confirm exactly one document exists and its _id is rule_default.');
@@ -117,7 +118,7 @@ function buildInstructions(plan) {
   }
 
   sections.push('Final A-group verification:');
-  sections.push('- Confirm the current result is not marked passed until the known dangling updatedBy reference is repaired.');
+  sections.push('- Confirm the current result is not marked passed until the missing security user exists and read-only reference verification succeeds.');
   sections.push('- Confirm exactly these three A-group collections were handled: colleges, users, risk_rules.');
   sections.push('- Confirm the A-group index total is exactly 3, all on users.');
   sections.push('- Run the supplied read-only verification script in an authenticated environment.');
@@ -126,31 +127,30 @@ function buildInstructions(plan) {
 
 function buildRemediationInstructions(plan) {
   const users = plan.collections.find((item) => item.collectionName === 'users');
-  const riskRules = plan.collections.find((item) => item.collectionName === 'risk_rules');
   const runtime = users.seedData.runtimePasswordInitialization;
-  const rule = riskRules.seedData.documents[0];
   const sections = [
     'A-GROUP REMEDIATION INSTRUCTIONS',
     '',
     `Only permitted environment: ${plan.envId}`,
     'Current status: PARTIAL / remediation required.',
     `Known dangling reference: ${plan.implementationStatus.knownIssue}`,
-    'This remediation may only create the missing security user and repair or rebuild risk_rules/rule_default as specified below.',
+    'This remediation may only create the missing security user and perform read-only verification of risk_rules/rule_default.',
+    'Do not update, delete, rebuild, or otherwise modify risk_rules/rule_default or any risk_rules field.',
     'Do not create __probe__, test, temp, probe, or any other collection. Do not test CloudBase capabilities by creating a collection.',
     'Do not modify colleges or the existing student/counselor users. If actual validation finds a conflict with DATABASE-DESIGN-v0.2, STOP and report it.',
     'On any failure: STOP.',
     '',
     `1. Confirm the environment is ${plan.envId}.`,
     `2. Read ${runtime.runtimeSeedPath}. Do not log its contents.`,
-    '3. Create users/usr_security_demo_001 from that runtime seed only.',
-    '4. Query that user and verify role=security, identityKey=security:security01, wxIdentityKey=unbound:usr_security_demo_001, wxOpenId=null, bindStatus=not_applicable, status=active, version=1, and a bcrypt cost-12 passwordHash. Verify no clear-text credential field exists.',
-    '5. Repair risk_rules/rule_default so updatedBy=usr_security_demo_001. Preserve all frozen rule fields. If a safe repair is unavailable, rebuild only rule_default with this exact document and server timestamps:',
-    formatValue(rule),
-    '6. Query users and verify count=3.',
-    '7. Query risk_rules and verify count=1.',
-    '8. Query rule_default.updatedBy and users/usr_security_demo_001 together; verify the reference exists and the target role is security.',
-    '9. Perform no operation on any other collection.',
-    '10. Record the result as remediation complete only after every verification succeeds; otherwise retain PARTIAL / remediation required.'
+    '3. Create users/usr_security_demo_001 from that runtime seed only. Convert createdAt and updatedAt serverTimestamp markers to CloudBase Date/current server time before insertion; never write the literal string serverTimestamp.',
+    '4. Query risk_rules/rule_default. Verify updatedBy=usr_security_demo_001 and every rule_default field matches plan.json. If any field differs, STOP and report it; do not modify risk_rules.',
+    '5. Query users/usr_security_demo_001. Verify role=security, identityKey=security:security01, wxIdentityKey=unbound:usr_security_demo_001, wxOpenId=null, bindStatus=not_applicable, status=active, version=1, createdAt and updatedAt are CloudBase Date values, and passwordHash is a non-empty bcrypt cost-12 hash without a placeholder.',
+    '6. After the database read validation succeeds, delete local .runtime/security-seed.json. The runtime seed must not be retained for final verification.',
+    '7. Query users and verify count=3.',
+    '8. Query risk_rules and verify count=1.',
+    '9. Verify rule_default.updatedBy references the existing users/usr_security_demo_001 document and that its role is security.',
+    '10. Run the final read-only verification after runtime seed cleanup. Perform no operation on any other collection.',
+    '11. Record the result as remediation complete only after every verification succeeds; otherwise retain PARTIAL / remediation required.'
   ];
   return `${sections.join('\n')}\n`;
 }
