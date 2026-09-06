@@ -1,0 +1,64 @@
+# ============================================================
+# 校园反诈安全管理系统 .gitignore
+# ============================================================
+
+# ---- Node.js / npm ----
+node_modules/
+miniprogram_npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json.bak
+yarn.lock.bak
+
+# ---- WeChat DevTools 本地缓存与私有配置 ----
+# 微信开发者工具会在项目根目录生成以下本地缓存/配置，不应入库
+.miniprogram/
+project.private.config.json
+cloudfunctionTemplate/
+
+# ---- 编译产物 ----
+dist/
+build/
+*.miniprogram/
+
+# ---- CloudBase CLI 本地配置（可能含临时凭据/缓存）----
+.tcb/
+.cloudbase/
+cloudbaserc.json
+.cloudbaserc
+
+# ---- 环境变量与密钥 ----
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# ---- 日志 ----
+*.log
+logs/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+
+# ---- 编辑器 ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# ---- 云函数依赖（按需忽略）----
+# 如果将来使用 npm 安装云函数依赖，每个云函数下的 node_modules 应被忽略
+cloudfunctions/**/node_modules/
