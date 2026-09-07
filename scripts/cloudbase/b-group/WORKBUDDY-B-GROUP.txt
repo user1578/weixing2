@@ -1,0 +1,61 @@
+B-GROUP CLOUDBASE IMPLEMENTATION INSTRUCTIONS
+
+Only permitted environment: aa-d4gvb4o3t50fc94f8
+
+This is an implementation plan only. Do not deploy cloud functions, change identity functions, or enter C group.
+Never create __probe__, probe, test, temp, or any collection outside this plan. Do not create probe records.
+
+For every target resource, first read the collection, fields, indexes, ACL, and existing records.
+- Existing and an exact match: verify and SKIP.
+- Existing but different: STOP and report; do not overwrite collections, indexes, ACL, or data.
+- Missing: create only the resource specified in plan.json.
+On any failure or missing read-only capability evidence: STOP. Do not improvise a substitute.
+
+All four collections require clientRead=false and clientWrite=false. They are accessible only through formal controlled server functions.
+This B-group plan initializes zero business records. Do not invent records merely to populate the database or test a capability.
+Any later approved minimum demo record must reference an existing legal users/college record, contain no actual personal data or OPENID, and convert every serverTimestamp marker into a CloudBase server Date value before writing.
+
+COLLECTION: alerts
+Exact fields: _id, sourceType, sourceReference, studentId, collegeId, fraudType, content, riskLevel, riskReasons, riskRuleId, status, issuedBy, issuedAt, readAt, closedAt, closeReason, version, createdAt, updatedAt
+Dates: issuedAt, readAt, closedAt, createdAt, updatedAt. Server timestamps: issuedAt, readAt, closedAt, createdAt, updatedAt.
+Client inputs only: sourceReference, fraudType, content, closeReason.
+Server-derived: studentId, collegeId, riskLevel, riskReasons, riskRuleId, issuedBy.
+Server-controlled: _id, sourceType=manual, status, issuedAt, readAt, closedAt, version, createdAt, updatedAt.
+States only: pending_dispatch, sent, viewed, following_up, closed. closed is terminal.
+Transitions only: pending_dispatch->sent; sent->viewed; sent/viewed->following_up; sent/viewed/following_up->closed.
+Version starts at 1; every update requires _id+version, and state updates also require expected status.
+Indexes exactly: (studentId asc, issuedAt desc); (collegeId asc, status asc, issuedAt desc); (status asc, riskLevel asc, issuedAt desc).
+
+COLLECTION: fraud_reports
+Exact fields: _id, studentId, collegeId, sourceAlertId, sourceAlertKey, fraudType, incidentAt, involvedAmount, hasLoss, incidentNarrative, suspiciousPlatform, suspiciousAccount, stillContacting, contactPhone, studentRemark, riskLevel, riskReasons, riskRuleId, status, currentHandlerId, finalOutcome, confirmedLossAmount, closeReason, submittedAt, closedAt, version, createdAt, updatedAt
+Dates: incidentAt, submittedAt, closedAt, createdAt, updatedAt. Server timestamps: submittedAt, closedAt, createdAt, updatedAt.
+Client inputs only: sourceAlertId, fraudType, incidentAt, involvedAmount, hasLoss, incidentNarrative, suspiciousPlatform, suspiciousAccount, stillContacting, contactPhone, studentRemark.
+Server-derived: studentId, collegeId, sourceAlertKey, riskLevel, riskReasons, riskRuleId, currentHandlerId, finalOutcome, confirmedLossAmount.
+Server-controlled: _id, status, closeReason, submittedAt, closedAt, version, createdAt, updatedAt.
+States only: pending_counselor_verify, pending_security_verify, in_process, closed. closed is terminal.
+Transitions only: pending_counselor_verify->pending_security_verify/closed; pending_security_verify->in_process/pending_counselor_verify/closed; in_process->closed.
+Version starts at 1; every update requires _id+version, and state updates also require expected status.
+UNIQUE exactly: sourceAlertKey, non-null and non-empty. Linked reports use alert:<sourceAlertId>; standalone reports use standalone:<reportId>. Never create UNIQUE on sourceAlertId.
+Indexes exactly: UNIQUE(sourceAlertKey); (studentId asc, submittedAt desc); (collegeId asc, status asc, submittedAt desc); (status asc, riskLevel asc, submittedAt desc); (status asc, closedAt desc); (collegeId asc, status asc, closedAt desc).
+
+COLLECTION: counselor_followups
+Exact fields: _id, businessType, businessId, studentId, collegeId, counselorId, status, contactedAt, contactMethod, opinion, verificationResult, focusFlag, focusReason, transferToSecurity, transferReason, version, createdAt, updatedAt, completedAt
+Dates: contactedAt, createdAt, updatedAt, completedAt. Server timestamps: createdAt, updatedAt, completedAt.
+Client inputs only: contactedAt, contactMethod, opinion, verificationResult, focusFlag, focusReason, transferToSecurity, transferReason.
+Server-derived: businessType, businessId, studentId, collegeId, counselorId.
+Server-controlled: _id, status, version, createdAt, updatedAt, completedAt.
+States only: pending, in_progress, completed. Reopen is forbidden; later follow-up creates a new record.
+Transitions only: pending->in_progress->completed.
+Version starts at 1; every update requires _id+version, and state updates also require expected status.
+Indexes exactly: (businessType asc, businessId asc, createdAt desc); (studentId asc, createdAt desc).
+
+COLLECTION: security_dispositions
+Exact fields: _id, reportId, operatorId, action, statusAfter, verificationResult, actionContent, returnReason, confirmedLossAmount, externalReferenceNo, nextActionAt, finalOutcome, createdAt
+Dates: nextActionAt, createdAt. Server timestamp: createdAt.
+Client inputs only: action, verificationResult, actionContent, returnReason, externalReferenceNo, nextActionAt, finalOutcome.
+Server-derived: reportId, operatorId, statusAfter, confirmedLossAmount. Server-controlled: _id, createdAt.
+Actions only: verify, start_process, return, close.
+Append-only history: no version; update and delete are forbidden after creation.
+Index exactly: (reportId asc, createdAt desc).
+
+Final read-only verification checks only aa-d4gvb4o3t50fc94f8 and these four collections. It must check existence, sampled record field structure, Date representations, version/lifecycle, all 12 indexes in order, the sourceAlertKey UNIQUE rule, and ACL=false/false.
