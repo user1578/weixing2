@@ -22,7 +22,7 @@ function verifySnapshot(snapshot, suppliedPlan) {
     assert(Number.isInteger(actual.documentCount) && actual.documentCount === 0, `${expected.collectionName}.documentCount must be 0; STOP without deleting data`);
     assert(actual.securityPolicy && actual.securityPolicy.clientRead === false && actual.securityPolicy.clientWrite === false && actual.securityPolicy.cloudBaseAcl === 'ADMINONLY', `${expected.collectionName} ACL must be ADMINONLY`);
     assert(Array.isArray(actual.indexes), `${expected.collectionName}.indexes must be present in read-only inventory`);
-    assert(JSON.stringify(actual.indexes.map(signature)) === JSON.stringify(expected.indexes.map(signature)), `${expected.collectionName} indexes, order, or UNIQUE differ from frozen design`);
+    assert(JSON.stringify(actual.indexes.map(signature).sort()) === JSON.stringify(expected.indexes.map(signature).sort()), `${expected.collectionName} indexes, field order, or UNIQUE differ from frozen design`);
   }
   const actualIndexCount = snapshot.collections.reduce((sum, item) => sum + item.indexes.length, 0);
   assert(actualIndexCount === 10, 'Snapshot must contain exactly 10 C-group custom indexes');

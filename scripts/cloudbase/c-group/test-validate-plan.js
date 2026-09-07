@@ -22,7 +22,7 @@ test('6. learning_records 删除 appendOnly 失败', () => reject((p) => { colle
 test('7. learning_records 改为单字段 UNIQUE 失败', () => reject((p) => { collection(p, 'learning_records').indexes[0].fields.splice(1, 1); }));
 test('8. learning_records 组合 UNIQUE 顺序错误失败', () => reject((p) => { collection(p, 'learning_records').indexes[0].fields.reverse(); }));
 test('9. audit_logs.actorId 改为 clientInput 失败', () => reject((p) => move(collection(p, 'audit_logs'), 'actorId', 'serverDerivedFields', 'clientInputFields')));
-test('10. audit_logs 缺 requestId 失败', () => reject((p) => collection(p, 'audit_logs').fields.pop()));
+test('10. audit_logs 缺 requestId 失败', () => reject((p) => { const audit = collection(p, 'audit_logs'); audit.fields.splice(audit.fields.indexOf('requestId'), 1); }));
 test('11. audit_logs 添加 version 失败', () => reject((p) => { collection(p, 'audit_logs').version.present = true; }));
 test('12. audit_logs appendOnly=false 失败', () => reject((p) => { collection(p, 'audit_logs').appendOnly = false; }));
 test('13. audit_logs.result 增加未知枚举失败', () => reject((p) => collection(p, 'audit_logs').enums.result.push('unknown')));
@@ -34,4 +34,6 @@ test('18. snapshot ACL 开放失败', () => { const snapshot = validSnapshot(); 
 test('19. snapshot learning_records UNIQUE 错误失败', () => { const snapshot = validSnapshot(); snapshot.collections[3].indexes[0] = { name: 'studentId_unique', fields: [{ field: 'studentId', order: 'asc' }], unique: true }; assert.throws(() => verifySnapshot(snapshot, plan)); });
 test('20. snapshot 多出计划外 C 组集合失败', () => { const snapshot = validSnapshot(); snapshot.collections.push({ collectionName: 'unexpected', exists: true, documentCount: 0, indexes: [], securityPolicy: { clientRead: false, clientWrite: false, cloudBaseAcl: 'ADMINONLY' } }); assert.throws(() => verifySnapshot(snapshot, plan)); });
 test('21. 正确空集合 snapshot 通过', () => assert.equal(verifySnapshot(validSnapshot(), plan), true));
-test('22. 生成说明与文件字节一致', () => assert.equal(fs.readFileSync(path.join(__dirname, 'WORKBUDDY-C-GROUP.txt'), 'utf8'), buildInstructions(plan)));
+test('22. snapshot 独立索引列表重新排序仍通过', () => { const snapshot = validSnapshot(); collection(snapshot, 'learning_records').indexes.reverse(); assert.equal(verifySnapshot(snapshot, plan), true); });
+test('23. snapshot 组合 UNIQUE 内部字段重新排序失败', () => { const snapshot = validSnapshot(); collection(snapshot, 'learning_records').indexes[0].fields.reverse(); assert.throws(() => verifySnapshot(snapshot, plan)); });
+test('24. 生成说明与文件字节一致', () => assert.equal(fs.readFileSync(path.join(__dirname, 'WORKBUDDY-C-GROUP.txt'), 'utf8'), buildInstructions(plan)));
