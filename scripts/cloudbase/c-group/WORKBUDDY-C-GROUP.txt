@@ -1,0 +1,62 @@
+C-GROUP CLOUDBASE IMPLEMENTATION INSTRUCTIONS
+
+Only permitted environment: aa-d4gvb4o3t50fc94f8.
+Current deployment status: PASSED.
+This material is for idempotent recovery and read-only re-verification only; it is not an initial implementation instruction.
+Scope is strictly and only: learning_articles, quiz_questions, quiz_attempts, learning_records, audit_logs.
+Before re-verification, use read-only inventory to confirm A group remains: colleges, users, risk_rules; and B group remains: alerts, fraud_reports, counselor_followups, security_dispositions.
+Do not modify any A- or B-group collection, indexes, ACL, data, function, or identity deployment.
+Do not deploy cloud functions. Do not enter production identity deployment. Do not create probe, test, temp resources, documents, collections, or indexes.
+CloudBase has no fixed physical field schema for empty collections. Fields, Date, version, append-only, and response-security rules are static plan contracts; never use a document to probe them.
+For each collection, first read only its existence, indexes, ACL, and documentCount. If existing and exact, verify then SKIP. If existing but different, STOP and report. If missing, STOP and report. Never recreate, overwrite, or repair a missing resource automatically.
+No initialization data in this round: all five collections must remain documentCount=0. Do not delete records if a nonzero count is found; STOP and report. De-identified article/question seeds are a later separately approved scope only.
+
+FROZEN COLLECTION 1: learning_articles
+Static fields (not physical schema): _id, title, category, summary, content, fraudTags, publishStatus, authorId, publishedAt, version, createdAt, updatedAt
+Required: _id, title, category, summary, content, fraudTags, publishStatus, authorId, version, createdAt, updatedAt; nullable: publishedAt; conditional: {"publishedAt":"when publishStatus=published"}.
+Date: publishedAt, createdAt, updatedAt; serverTimestamp: publishedAt, createdAt, updatedAt.
+Inputs: title, category, summary, content, fraudTags; derived: authorId; server-controlled: _id, publishStatus, publishedAt, version, createdAt, updatedAt.
+Indexes (exact): publishStatus_publishedAt: publishStatus asc, publishedAt desc.
+ACL: clientRead=false, clientWrite=false, CloudBase ACL=ADMINONLY.
+Version contract: create default 1; updates require _id + version.
+
+FROZEN COLLECTION 2: quiz_questions
+Static fields (not physical schema): _id, questionType, stem, options, correctOptionIds, explanation, fraudTags, status, version, createdAt, updatedAt
+Required: _id, questionType, stem, options, correctOptionIds, explanation, fraudTags, status, version, createdAt, updatedAt; nullable: (none); conditional: {}.
+Date: createdAt, updatedAt; serverTimestamp: createdAt, updatedAt.
+Inputs: questionType, stem, options, correctOptionIds, explanation, fraudTags; derived: (none); server-controlled: _id, status, version, createdAt, updatedAt.
+Indexes (exact): status: status asc.
+ACL: clientRead=false, clientWrite=false, CloudBase ACL=ADMINONLY.
+Version contract: create default 1; updates require _id + version.
+Response safety: correctOptionIds is server-only for scoring and must be omitted from student question responses; explanation is returned only after answering.
+
+FROZEN COLLECTION 3: quiz_attempts
+Static fields (not physical schema): _id, studentId, answers, score, totalScore, submittedAt, createdAt
+Required: _id, studentId, answers, score, totalScore, submittedAt, createdAt; nullable: (none); conditional: {}.
+Date: submittedAt, createdAt; serverTimestamp: submittedAt, createdAt.
+Inputs: (none); derived: studentId, answers, score, totalScore; server-controlled: _id, submittedAt, createdAt.
+Indexes (exact): studentId_submittedAt: studentId asc, submittedAt desc | submittedAt: submittedAt desc.
+ACL: clientRead=false, clientWrite=false, CloudBase ACL=ADMINONLY.
+Lifecycle: append-only; no version; update and delete forbidden after create.
+
+FROZEN COLLECTION 4: learning_records
+Static fields (not physical schema): _id, studentId, articleId, completedAt, createdAt
+Required: _id, studentId, articleId, completedAt, createdAt; nullable: (none); conditional: {}.
+Date: completedAt, createdAt; serverTimestamp: completedAt, createdAt.
+Inputs: articleId; derived: studentId; server-controlled: _id, completedAt, createdAt.
+Indexes (exact): UNIQUE studentId_articleId_unique: studentId asc, articleId asc | studentId_completedAt: studentId asc, completedAt desc | completedAt: completedAt desc.
+ACL: clientRead=false, clientWrite=false, CloudBase ACL=ADMINONLY.
+Lifecycle: append-only; no version; update and delete forbidden after create.
+UNIQUE: exactly (studentId, articleId), in that order; do not create standalone studentId or articleId UNIQUE.
+
+FROZEN COLLECTION 5: audit_logs
+Static fields (not physical schema): _id, actorId, actorRole, actorCollegeId, action, resourceType, resourceId, result, failureReason, beforeSummary, afterSummary, requestId, createdAt
+Required: _id, actorId, actorRole, action, resourceType, resourceId, result, requestId, createdAt; nullable: actorCollegeId, failureReason, beforeSummary, afterSummary; conditional: {"failureReason":"when result=failure"}.
+Date: createdAt; serverTimestamp: createdAt.
+Inputs: (none); derived: actorId, actorRole, actorCollegeId; server-controlled: _id, action, resourceType, resourceId, result, failureReason, beforeSummary, afterSummary, requestId, createdAt.
+Indexes (exact): actorId_createdAt: actorId asc, createdAt desc | resourceType_resourceId_createdAt: resourceType asc, resourceId asc, createdAt desc | action_createdAt: action asc, createdAt desc.
+ACL: clientRead=false, clientWrite=false, CloudBase ACL=ADMINONLY.
+Lifecycle: append-only; no version; update and delete forbidden after create.
+Audit contract: actorId is server-derived; actorCollegeId is nullable and null for security; only result=success/failure; failureReason only for failures; summaries are minimum state only and must never contain full sensitive text; no complete action enum is invented.
+
+audit_logs is formally present, but never insert an audit record manually. Acceptance is read-only: verify this env, exactly these five collections, existence, documentCount=0, exact index field order/UNIQUE, and ADMINONLY ACL. A missing collection at acceptance is a failure. Never rely on sampleDocuments or add them.

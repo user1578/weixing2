@@ -1,0 +1,153 @@
+{
+  "sourceOfTruth": [
+    "SRS-v0.2",
+    "DATABASE-DESIGN-v0.2",
+    "CLOUDBASE-DEVELOPMENT-GUARDRAILS",
+    "CLOUDBASE-IMPLEMENTATION-CHECKLIST"
+  ],
+  "envId": "aa-d4gvb4o3t50fc94f8",
+  "group": "B",
+  "serverTimestampMarker": "serverTimestamp",
+  "cloudBaseCollectionModel": {
+    "hasFixedPhysicalFieldSchema": false,
+    "physicalResources": ["collection", "indexes", "acl"],
+    "staticContracts": ["fields", "requiredness", "Date", "version", "stateMachine"]
+  },
+  "implementationStatus": {
+    "status": "PASSED",
+    "remediationRequired": false,
+    "blockNextGroup": false,
+    "knownIssue": null,
+    "currentCloudBaseState": {
+      "alerts": 0,
+      "fraud_reports": 0,
+      "counselor_followups": 0,
+      "security_dispositions": 0,
+      "customIndexCount": 12
+    }
+  },
+  "allowedCollections": [
+    "alerts",
+    "fraud_reports",
+    "counselor_followups",
+    "security_dispositions"
+  ],
+  "creationOrder": [
+    "alerts",
+    "fraud_reports",
+    "counselor_followups",
+    "security_dispositions"
+  ],
+  "idempotencyPolicy": {
+    "existingExactMatch": "verify_and_skip",
+    "existingMismatch": "stop_and_report",
+    "missing": "stop_and_report",
+    "forbiddenProbeCollectionNames": [
+      "__probe__",
+      "probe",
+      "test",
+      "temp"
+    ]
+  },
+  "initializationPolicy": {
+    "strategy": "No B-group business records are initialized in this round. Future minimal demo records require existing legal users and colleges, serverTimestamp Date values, and no real personal or OPENID data.",
+    "documents": []
+  },
+  "collections": [
+    {
+      "collectionName": "alerts",
+      "expectedDocumentCount": 0,
+      "fields": ["_id", "sourceType", "sourceReference", "studentId", "collegeId", "fraudType", "content", "riskLevel", "riskReasons", "riskRuleId", "status", "issuedBy", "issuedAt", "readAt", "closedAt", "closeReason", "version", "createdAt", "updatedAt"],
+      "requiredFields": ["_id", "sourceType", "studentId", "collegeId", "fraudType", "content", "riskLevel", "riskReasons", "riskRuleId", "status", "version", "createdAt", "updatedAt"],
+      "nullableFields": ["sourceReference", "issuedBy", "issuedAt", "readAt", "closedAt", "closeReason"],
+      "conditionalRequiredFields": {"issuedBy": "after dispatch", "issuedAt": "after dispatch", "readAt": "after first read", "closedAt": "when status=closed", "closeReason": "when status=closed"},
+      "dateFields": ["issuedAt", "readAt", "closedAt", "createdAt", "updatedAt"],
+      "serverTimestampFields": ["issuedAt", "readAt", "closedAt", "createdAt", "updatedAt"],
+      "foreignKeys": {"studentId": "users._id", "collegeId": "colleges._id", "riskRuleId": "risk_rules._id", "issuedBy": "users._id"},
+      "clientInputFields": ["sourceReference", "fraudType", "content", "closeReason"],
+      "serverDerivedFields": ["studentId", "collegeId", "riskLevel", "riskReasons", "riskRuleId", "issuedBy"],
+      "serverControlledFields": ["_id", "sourceType", "status", "issuedAt", "readAt", "closedAt", "version", "createdAt", "updatedAt"],
+      "enums": {"sourceType": ["manual"], "fraudType": ["part_time_scam", "impersonate_public", "fake_loan", "fake_refund", "other"], "riskLevel": ["low", "medium", "high"], "status": ["pending_dispatch", "sent", "viewed", "following_up", "closed"]},
+      "stateMachine": {"currentStateField": "status", "initial": "pending_dispatch", "transitions": ["pending_dispatch->sent", "sent->viewed", "sent->following_up", "viewed->following_up", "sent->closed", "viewed->closed", "following_up->closed"], "terminal": ["closed"]},
+      "version": {"present": true, "createDefault": 1, "updateCondition": ["_id", "version"], "stateUpdateCondition": ["_id", "expectedStatus", "version"]},
+      "indexes": [
+        {"name": "studentId_issuedAt", "fields": [{"field": "studentId", "order": "asc"}, {"field": "issuedAt", "order": "desc"}], "unique": false},
+        {"name": "collegeId_status_issuedAt", "fields": [{"field": "collegeId", "order": "asc"}, {"field": "status", "order": "asc"}, {"field": "issuedAt", "order": "desc"}], "unique": false},
+        {"name": "status_riskLevel_issuedAt", "fields": [{"field": "status", "order": "asc"}, {"field": "riskLevel", "order": "asc"}, {"field": "issuedAt", "order": "desc"}], "unique": false}
+      ],
+      "securityPolicy": {"clientRead": false, "clientWrite": false, "requirement": "Client database access is denied; controlled server functions are the only access path."},
+      "seedData": {"documents": []}
+    },
+    {
+      "collectionName": "fraud_reports",
+      "expectedDocumentCount": 0,
+      "fields": ["_id", "studentId", "collegeId", "sourceAlertId", "sourceAlertKey", "fraudType", "incidentAt", "involvedAmount", "hasLoss", "incidentNarrative", "suspiciousPlatform", "suspiciousAccount", "stillContacting", "contactPhone", "studentRemark", "riskLevel", "riskReasons", "riskRuleId", "status", "currentHandlerId", "finalOutcome", "confirmedLossAmount", "closeReason", "submittedAt", "closedAt", "version", "createdAt", "updatedAt"],
+      "requiredFields": ["_id", "studentId", "collegeId", "sourceAlertKey", "fraudType", "incidentAt", "involvedAmount", "hasLoss", "incidentNarrative", "stillContacting", "riskLevel", "riskReasons", "riskRuleId", "status", "version", "submittedAt", "createdAt", "updatedAt"],
+      "nullableFields": ["sourceAlertId", "suspiciousPlatform", "suspiciousAccount", "contactPhone", "studentRemark", "currentHandlerId", "finalOutcome", "confirmedLossAmount", "closeReason", "closedAt"],
+      "conditionalRequiredFields": {"finalOutcome": "when status=closed", "confirmedLossAmount": "security close; otherwise null", "closeReason": "when status=closed", "closedAt": "when status=closed"},
+      "dateFields": ["incidentAt", "submittedAt", "closedAt", "createdAt", "updatedAt"],
+      "serverTimestampFields": ["submittedAt", "closedAt", "createdAt", "updatedAt"],
+      "foreignKeys": {"studentId": "users._id", "collegeId": "colleges._id", "sourceAlertId": "alerts._id", "riskRuleId": "risk_rules._id", "currentHandlerId": "users._id"},
+      "clientInputFields": ["sourceAlertId", "fraudType", "incidentAt", "involvedAmount", "hasLoss", "incidentNarrative", "suspiciousPlatform", "suspiciousAccount", "stillContacting", "contactPhone", "studentRemark"],
+      "serverDerivedFields": ["studentId", "collegeId", "sourceAlertKey", "riskLevel", "riskReasons", "riskRuleId", "currentHandlerId", "finalOutcome", "confirmedLossAmount"],
+      "serverControlledFields": ["_id", "status", "closeReason", "submittedAt", "closedAt", "version", "createdAt", "updatedAt"],
+      "enums": {"fraudType": ["part_time_scam", "impersonate_public", "fake_loan", "fake_refund", "other"], "riskLevel": ["low", "medium", "high"], "status": ["pending_counselor_verify", "pending_security_verify", "in_process", "closed"], "finalOutcome": ["loss_confirmed", "loss_no_loss", "misreport", "consultation"]},
+      "stateMachine": {"currentStateField": "status", "initial": "pending_counselor_verify", "transitions": ["pending_counselor_verify->pending_security_verify", "pending_counselor_verify->closed", "pending_security_verify->in_process", "pending_security_verify->pending_counselor_verify", "pending_security_verify->closed", "in_process->closed"], "terminal": ["closed"]},
+      "version": {"present": true, "createDefault": 1, "updateCondition": ["_id", "version"], "stateUpdateCondition": ["_id", "expectedStatus", "version"]},
+      "uniqueRules": [{"field": "sourceAlertKey", "requiredNonNull": true, "linkedFormat": "alert:<sourceAlertId>", "standaloneFormat": "standalone:<reportId>", "forbiddenDirectUniqueField": "sourceAlertId"}],
+      "indexes": [
+        {"name": "sourceAlertKey_unique", "fields": [{"field": "sourceAlertKey", "order": "asc"}], "unique": true},
+        {"name": "studentId_submittedAt", "fields": [{"field": "studentId", "order": "asc"}, {"field": "submittedAt", "order": "desc"}], "unique": false},
+        {"name": "collegeId_status_submittedAt", "fields": [{"field": "collegeId", "order": "asc"}, {"field": "status", "order": "asc"}, {"field": "submittedAt", "order": "desc"}], "unique": false},
+        {"name": "status_riskLevel_submittedAt", "fields": [{"field": "status", "order": "asc"}, {"field": "riskLevel", "order": "asc"}, {"field": "submittedAt", "order": "desc"}], "unique": false},
+        {"name": "status_closedAt", "fields": [{"field": "status", "order": "asc"}, {"field": "closedAt", "order": "desc"}], "unique": false},
+        {"name": "collegeId_status_closedAt", "fields": [{"field": "collegeId", "order": "asc"}, {"field": "status", "order": "asc"}, {"field": "closedAt", "order": "desc"}], "unique": false}
+      ],
+      "securityPolicy": {"clientRead": false, "clientWrite": false, "requirement": "Client database access is denied; controlled server functions are the only access path."},
+      "seedData": {"documents": []}
+    },
+    {
+      "collectionName": "counselor_followups",
+      "expectedDocumentCount": 0,
+      "fields": ["_id", "businessType", "businessId", "studentId", "collegeId", "counselorId", "status", "contactedAt", "contactMethod", "opinion", "verificationResult", "focusFlag", "focusReason", "transferToSecurity", "transferReason", "version", "createdAt", "updatedAt", "completedAt"],
+      "requiredFields": ["_id", "businessType", "businessId", "studentId", "collegeId", "counselorId", "status", "opinion", "focusFlag", "transferToSecurity", "version", "createdAt", "updatedAt"],
+      "nullableFields": ["contactedAt", "contactMethod", "verificationResult", "focusReason", "transferReason", "completedAt"],
+      "conditionalRequiredFields": {"verificationResult": "when status=completed", "focusReason": "when focusFlag=true", "transferReason": "when transferToSecurity=true", "completedAt": "when status=completed"},
+      "dateFields": ["contactedAt", "createdAt", "updatedAt", "completedAt"],
+      "serverTimestampFields": ["createdAt", "updatedAt", "completedAt"],
+      "foreignKeys": {"businessId": "alerts._id or fraud_reports._id", "studentId": "users._id", "collegeId": "colleges._id", "counselorId": "users._id"},
+      "clientInputFields": ["contactedAt", "contactMethod", "opinion", "verificationResult", "focusFlag", "focusReason", "transferToSecurity", "transferReason"],
+      "serverDerivedFields": ["businessType", "businessId", "studentId", "collegeId", "counselorId"],
+      "serverControlledFields": ["_id", "status", "version", "createdAt", "updatedAt", "completedAt"],
+      "enums": {"businessType": ["alert", "report"], "status": ["pending", "in_progress", "completed"], "contactMethod": ["phone", "wechat", "in_person", "other"], "verificationResult": ["confirmed", "suspected", "misreport", "consultation", "not_fraud"]},
+      "stateMachine": {"currentStateField": "status", "initial": "pending", "transitions": ["pending->in_progress", "in_progress->completed"], "terminal": ["completed"]},
+      "version": {"present": true, "createDefault": 1, "updateCondition": ["_id", "version"], "stateUpdateCondition": ["_id", "expectedStatus", "version"]},
+      "indexes": [
+        {"name": "businessType_businessId_createdAt", "fields": [{"field": "businessType", "order": "asc"}, {"field": "businessId", "order": "asc"}, {"field": "createdAt", "order": "desc"}], "unique": false},
+        {"name": "studentId_createdAt", "fields": [{"field": "studentId", "order": "asc"}, {"field": "createdAt", "order": "desc"}], "unique": false}
+      ],
+      "securityPolicy": {"clientRead": false, "clientWrite": false, "requirement": "Client database access is denied; controlled server functions are the only access path."},
+      "seedData": {"documents": []}
+    },
+    {
+      "collectionName": "security_dispositions",
+      "expectedDocumentCount": 0,
+      "fields": ["_id", "reportId", "operatorId", "action", "statusAfter", "verificationResult", "actionContent", "returnReason", "confirmedLossAmount", "externalReferenceNo", "nextActionAt", "finalOutcome", "createdAt"],
+      "requiredFields": ["_id", "reportId", "operatorId", "action", "statusAfter", "actionContent", "createdAt"],
+      "nullableFields": ["verificationResult", "returnReason", "confirmedLossAmount", "externalReferenceNo", "nextActionAt", "finalOutcome"],
+      "conditionalRequiredFields": {"verificationResult": "for verify, return, or close", "returnReason": "when action=return", "confirmedLossAmount": "when action=close", "finalOutcome": "when action=close"},
+      "dateFields": ["nextActionAt", "createdAt"],
+      "serverTimestampFields": ["createdAt"],
+      "foreignKeys": {"reportId": "fraud_reports._id", "operatorId": "users._id"},
+      "clientInputFields": ["action", "verificationResult", "actionContent", "returnReason", "externalReferenceNo", "nextActionAt", "finalOutcome"],
+      "serverDerivedFields": ["reportId", "operatorId", "statusAfter", "confirmedLossAmount"],
+      "serverControlledFields": ["_id", "createdAt"],
+      "enums": {"action": ["verify", "start_process", "return", "close"], "verificationResult": ["confirmed", "suspected", "misreport", "consultation", "not_fraud"], "finalOutcome": ["loss_confirmed", "loss_no_loss", "misreport", "consultation"]},
+      "appendOnly": true,
+      "version": {"present": false, "createDefault": null, "immutableAfterCreate": true},
+      "indexes": [{"name": "reportId_createdAt", "fields": [{"field": "reportId", "order": "asc"}, {"field": "createdAt", "order": "desc"}], "unique": false}],
+      "securityPolicy": {"clientRead": false, "clientWrite": false, "requirement": "Client database access is denied; controlled server functions are the only access path."},
+      "seedData": {"documents": []}
+    }
+  ]
+}
