@@ -1,61 +1,63 @@
 B-GROUP CLOUDBASE IMPLEMENTATION INSTRUCTIONS
 
 Only permitted environment: aa-d4gvb4o3t50fc94f8
-
-This is an implementation plan only. Do not deploy cloud functions, change identity functions, or enter C group.
-Never create __probe__, probe, test, temp, or any collection outside this plan. Do not create probe records.
-
-For every target resource, first read the collection, fields, indexes, ACL, and existing records.
-- Existing and an exact match: verify and SKIP.
-- Existing but different: STOP and report; do not overwrite collections, indexes, ACL, or data.
-- Missing: create only the resource specified in plan.json.
-On any failure or missing read-only capability evidence: STOP. Do not improvise a substitute.
-
-All four collections require clientRead=false and clientWrite=false. They are accessible only through formal controlled server functions.
-This B-group plan initializes zero business records. Do not invent records merely to populate the database or test a capability.
-Any later approved minimum demo record must reference an existing legal users/college record, contain no actual personal data or OPENID, and convert every serverTimestamp marker into a CloudBase server Date value before writing.
+This material is a plan only. Do not deploy cloud functions and do not enter C group.
+Never create probe, test, temp, or other out-of-plan collections.
+CloudBase collections have no fixed physical field schema. Do not claim to create or verify a field schema in an empty collection.
+Physical implementation creates or verifies only: collection, indexes, and ACL. Fields, requiredness, Date, version, and state machines are static source/plan contracts validated by validate-plan.js.
+Before every target collection: read its existence, indexes, ACL, and documentCount only. Do not insert a probe, test, or temporary document.
+Existing and exact: verify then SKIP. Existing but different: STOP and report. Missing: create exactly from this plan.
+Client read=false and client write=false are mandatory for every B-group collection.
+No B-group business records are initialized by this plan. Final B-group acceptance requires documentCount=0 for every collection. If any count is nonzero, STOP and report; never delete data to make acceptance pass.
+Any future approved seed requires a separate authorization and validation plan; do not add one here.
 
 COLLECTION: alerts
-Exact fields: _id, sourceType, sourceReference, studentId, collegeId, fraudType, content, riskLevel, riskReasons, riskRuleId, status, issuedBy, issuedAt, readAt, closedAt, closeReason, version, createdAt, updatedAt
-Dates: issuedAt, readAt, closedAt, createdAt, updatedAt. Server timestamps: issuedAt, readAt, closedAt, createdAt, updatedAt.
-Client inputs only: sourceReference, fraudType, content, closeReason.
-Server-derived: studentId, collegeId, riskLevel, riskReasons, riskRuleId, issuedBy.
-Server-controlled: _id, sourceType=manual, status, issuedAt, readAt, closedAt, version, createdAt, updatedAt.
-States only: pending_dispatch, sent, viewed, following_up, closed. closed is terminal.
-Transitions only: pending_dispatch->sent; sent->viewed; sent/viewed->following_up; sent/viewed/following_up->closed.
-Version starts at 1; every update requires _id+version, and state updates also require expected status.
-Indexes exactly: (studentId asc, issuedAt desc); (collegeId asc, status asc, issuedAt desc); (status asc, riskLevel asc, issuedAt desc).
+Static contract only (not a CloudBase physical schema): fields=_id, sourceType, sourceReference, studentId, collegeId, fraudType, content, riskLevel, riskReasons, riskRuleId, status, issuedBy, issuedAt, readAt, closedAt, closeReason, version, createdAt, updatedAt
+Static Dates=issuedAt, readAt, closedAt, createdAt, updatedAt; server timestamps=issuedAt, readAt, closedAt, createdAt, updatedAt
+Static client inputs=sourceReference, fraudType, content, closeReason
+Static server-derived=studentId, collegeId, riskLevel, riskReasons, riskRuleId, issuedBy
+Static server-controlled=_id, sourceType, status, issuedAt, readAt, closedAt, version, createdAt, updatedAt
+Indexes (exact): studentId_issuedAt: studentId asc, issuedAt desc | collegeId_status_issuedAt: collegeId asc, status asc, issuedAt desc | status_riskLevel_issuedAt: status asc, riskLevel asc, issuedAt desc
+ACL: clientRead=false; clientWrite=false
+Final acceptance documentCount: 0.
+Version: create at 1; normal updates require _id + version; state updates require _id + expectedStatus + version.
+State machine: initial=pending_dispatch; pending_dispatch->sent; sent->viewed; sent->following_up; viewed->following_up; sent->closed; viewed->closed; following_up->closed. Terminal: closed.
 
 COLLECTION: fraud_reports
-Exact fields: _id, studentId, collegeId, sourceAlertId, sourceAlertKey, fraudType, incidentAt, involvedAmount, hasLoss, incidentNarrative, suspiciousPlatform, suspiciousAccount, stillContacting, contactPhone, studentRemark, riskLevel, riskReasons, riskRuleId, status, currentHandlerId, finalOutcome, confirmedLossAmount, closeReason, submittedAt, closedAt, version, createdAt, updatedAt
-Dates: incidentAt, submittedAt, closedAt, createdAt, updatedAt. Server timestamps: submittedAt, closedAt, createdAt, updatedAt.
-Client inputs only: sourceAlertId, fraudType, incidentAt, involvedAmount, hasLoss, incidentNarrative, suspiciousPlatform, suspiciousAccount, stillContacting, contactPhone, studentRemark.
-Server-derived: studentId, collegeId, sourceAlertKey, riskLevel, riskReasons, riskRuleId, currentHandlerId, finalOutcome, confirmedLossAmount.
-Server-controlled: _id, status, closeReason, submittedAt, closedAt, version, createdAt, updatedAt.
-States only: pending_counselor_verify, pending_security_verify, in_process, closed. closed is terminal.
-Transitions only: pending_counselor_verify->pending_security_verify/closed; pending_security_verify->in_process/pending_counselor_verify/closed; in_process->closed.
-Version starts at 1; every update requires _id+version, and state updates also require expected status.
-UNIQUE exactly: sourceAlertKey, non-null and non-empty. Linked reports use alert:<sourceAlertId>; standalone reports use standalone:<reportId>. Never create UNIQUE on sourceAlertId.
-Indexes exactly: UNIQUE(sourceAlertKey); (studentId asc, submittedAt desc); (collegeId asc, status asc, submittedAt desc); (status asc, riskLevel asc, submittedAt desc); (status asc, closedAt desc); (collegeId asc, status asc, closedAt desc).
+Static contract only (not a CloudBase physical schema): fields=_id, studentId, collegeId, sourceAlertId, sourceAlertKey, fraudType, incidentAt, involvedAmount, hasLoss, incidentNarrative, suspiciousPlatform, suspiciousAccount, stillContacting, contactPhone, studentRemark, riskLevel, riskReasons, riskRuleId, status, currentHandlerId, finalOutcome, confirmedLossAmount, closeReason, submittedAt, closedAt, version, createdAt, updatedAt
+Static Dates=incidentAt, submittedAt, closedAt, createdAt, updatedAt; server timestamps=submittedAt, closedAt, createdAt, updatedAt
+Static client inputs=sourceAlertId, fraudType, incidentAt, involvedAmount, hasLoss, incidentNarrative, suspiciousPlatform, suspiciousAccount, stillContacting, contactPhone, studentRemark
+Static server-derived=studentId, collegeId, sourceAlertKey, riskLevel, riskReasons, riskRuleId, currentHandlerId, finalOutcome, confirmedLossAmount
+Static server-controlled=_id, status, closeReason, submittedAt, closedAt, version, createdAt, updatedAt
+Indexes (exact): UNIQUE sourceAlertKey_unique: sourceAlertKey asc | studentId_submittedAt: studentId asc, submittedAt desc | collegeId_status_submittedAt: collegeId asc, status asc, submittedAt desc | status_riskLevel_submittedAt: status asc, riskLevel asc, submittedAt desc | status_closedAt: status asc, closedAt desc | collegeId_status_closedAt: collegeId asc, status asc, closedAt desc
+ACL: clientRead=false; clientWrite=false
+Final acceptance documentCount: 0.
+Version: create at 1; normal updates require _id + version; state updates require _id + expectedStatus + version.
+State machine: initial=pending_counselor_verify; pending_counselor_verify->pending_security_verify; pending_counselor_verify->closed; pending_security_verify->in_process; pending_security_verify->pending_counselor_verify; pending_security_verify->closed; in_process->closed. Terminal: closed.
+UNIQUE: sourceAlertKey is non-null; linked=alert:<sourceAlertId>; standalone=standalone:<reportId>; never build UNIQUE on sourceAlertId.
 
 COLLECTION: counselor_followups
-Exact fields: _id, businessType, businessId, studentId, collegeId, counselorId, status, contactedAt, contactMethod, opinion, verificationResult, focusFlag, focusReason, transferToSecurity, transferReason, version, createdAt, updatedAt, completedAt
-Dates: contactedAt, createdAt, updatedAt, completedAt. Server timestamps: createdAt, updatedAt, completedAt.
-Client inputs only: contactedAt, contactMethod, opinion, verificationResult, focusFlag, focusReason, transferToSecurity, transferReason.
-Server-derived: businessType, businessId, studentId, collegeId, counselorId.
-Server-controlled: _id, status, version, createdAt, updatedAt, completedAt.
-States only: pending, in_progress, completed. Reopen is forbidden; later follow-up creates a new record.
-Transitions only: pending->in_progress->completed.
-Version starts at 1; every update requires _id+version, and state updates also require expected status.
-Indexes exactly: (businessType asc, businessId asc, createdAt desc); (studentId asc, createdAt desc).
+Static contract only (not a CloudBase physical schema): fields=_id, businessType, businessId, studentId, collegeId, counselorId, status, contactedAt, contactMethod, opinion, verificationResult, focusFlag, focusReason, transferToSecurity, transferReason, version, createdAt, updatedAt, completedAt
+Static Dates=contactedAt, createdAt, updatedAt, completedAt; server timestamps=createdAt, updatedAt, completedAt
+Static client inputs=contactedAt, contactMethod, opinion, verificationResult, focusFlag, focusReason, transferToSecurity, transferReason
+Static server-derived=businessType, businessId, studentId, collegeId, counselorId
+Static server-controlled=_id, status, version, createdAt, updatedAt, completedAt
+Indexes (exact): businessType_businessId_createdAt: businessType asc, businessId asc, createdAt desc | studentId_createdAt: studentId asc, createdAt desc
+ACL: clientRead=false; clientWrite=false
+Final acceptance documentCount: 0.
+Version: create at 1; normal updates require _id + version; state updates require _id + expectedStatus + version.
+State machine: initial=pending; pending->in_progress; in_progress->completed. Terminal: completed.
 
 COLLECTION: security_dispositions
-Exact fields: _id, reportId, operatorId, action, statusAfter, verificationResult, actionContent, returnReason, confirmedLossAmount, externalReferenceNo, nextActionAt, finalOutcome, createdAt
-Dates: nextActionAt, createdAt. Server timestamp: createdAt.
-Client inputs only: action, verificationResult, actionContent, returnReason, externalReferenceNo, nextActionAt, finalOutcome.
-Server-derived: reportId, operatorId, statusAfter, confirmedLossAmount. Server-controlled: _id, createdAt.
-Actions only: verify, start_process, return, close.
-Append-only history: no version; update and delete are forbidden after creation.
-Index exactly: (reportId asc, createdAt desc).
+Static contract only (not a CloudBase physical schema): fields=_id, reportId, operatorId, action, statusAfter, verificationResult, actionContent, returnReason, confirmedLossAmount, externalReferenceNo, nextActionAt, finalOutcome, createdAt
+Static Dates=nextActionAt, createdAt; server timestamps=createdAt
+Static client inputs=action, verificationResult, actionContent, returnReason, externalReferenceNo, nextActionAt, finalOutcome
+Static server-derived=reportId, operatorId, statusAfter, confirmedLossAmount
+Static server-controlled=_id, createdAt
+Indexes (exact): reportId_createdAt: reportId asc, createdAt desc
+ACL: clientRead=false; clientWrite=false
+Final acceptance documentCount: 0.
+Lifecycle: append-only history; no version; update/delete are forbidden after creation.
 
-Final read-only verification checks only aa-d4gvb4o3t50fc94f8 and these four collections. It must check existence, sampled record field structure, Date representations, version/lifecycle, all 12 indexes in order, the sourceAlertKey UNIQUE rule, and ACL=false/false.
+Read-only verification must validate only this env and these four collections: existence, documentCount=0, exact index count/order and UNIQUE, and ACL.
+Do not create a probe record to test fields, Date, version, or state logic. If read-only evidence is insufficient, STOP and report the unknown capability.

@@ -17,32 +17,34 @@ function buildInstructions(plan) {
     `Only permitted environment: ${plan.envId}`,
     'This material is a plan only. Do not deploy cloud functions and do not enter C group.',
     'Never create probe, test, temp, or other out-of-plan collections.',
-    'Before every target collection: read its existence, fields, indexes, ACL, and existing records.',
+    'CloudBase collections have no fixed physical field schema. Do not claim to create or verify a field schema in an empty collection.',
+    'Physical implementation creates or verifies only: collection, indexes, and ACL. Fields, requiredness, Date, version, and state machines are static source/plan contracts validated by validate-plan.js.',
+    'Before every target collection: read its existence, indexes, ACL, and documentCount only. Do not insert a probe, test, or temporary document.',
     'Existing and exact: verify then SKIP. Existing but different: STOP and report. Missing: create exactly from this plan.',
     'Client read=false and client write=false are mandatory for every B-group collection.',
-    'No B-group business records are initialized by this plan. Do not invent test records.',
-    'Any future approved seed must reference existing users/colleges, contain no real personal data or OPENID, and convert serverTimestamp markers to CloudBase server Date values.',
+    'No B-group business records are initialized by this plan. Final B-group acceptance requires documentCount=0 for every collection. If any count is nonzero, STOP and report; never delete data to make acceptance pass.',
+    'Any future approved seed requires a separate authorization and validation plan; do not add one here.',
     ''
   ];
   for (const name of plan.creationOrder) {
     const item = plan.collections.find((entry) => entry.collectionName === name);
     lines.push(`COLLECTION: ${name}`);
-    lines.push(`Fields (exact): ${item.fields.join(', ')}`);
-    lines.push(`Dates: ${item.dateFields.join(', ')}`);
-    lines.push(`Server timestamps: ${item.serverTimestampFields.join(', ')}`);
-    lines.push(`Client inputs only: ${item.clientInputFields.join(', ')}`);
-    lines.push(`Server-derived: ${item.serverDerivedFields.join(', ')}`);
-    lines.push(`Server-controlled: ${item.serverControlledFields.join(', ')}`);
+    lines.push(`Static contract only (not a CloudBase physical schema): fields=${item.fields.join(', ')}`);
+    lines.push(`Static Dates=${item.dateFields.join(', ')}; server timestamps=${item.serverTimestampFields.join(', ')}`);
+    lines.push(`Static client inputs=${item.clientInputFields.join(', ')}`);
+    lines.push(`Static server-derived=${item.serverDerivedFields.join(', ')}`);
+    lines.push(`Static server-controlled=${item.serverControlledFields.join(', ')}`);
     lines.push(`Indexes (exact): ${item.indexes.map(formatIndex).join(' | ')}`);
     lines.push(`ACL: clientRead=${item.securityPolicy.clientRead}; clientWrite=${item.securityPolicy.clientWrite}`);
-    if (item.version.present) lines.push('Version: create at 1; every update requires _id + version; state updates also require expected status.');
+    lines.push(`Final acceptance documentCount: ${item.expectedDocumentCount}.`);
+    if (item.version.present) lines.push(`Version: create at 1; normal updates require ${item.version.updateCondition.join(' + ')}; state updates require ${item.version.stateUpdateCondition.join(' + ')}.`);
     else lines.push('Lifecycle: append-only history; no version; update/delete are forbidden after creation.');
-    if (item.stateMachine) lines.push(`State machine: ${item.stateMachine.transitions.join('; ')}. Terminal: ${item.stateMachine.terminal.join(', ')}.`);
+    if (item.stateMachine) lines.push(`State machine: initial=${item.stateMachine.initial}; ${item.stateMachine.transitions.join('; ')}. Terminal: ${item.stateMachine.terminal.join(', ')}.`);
     if (item.uniqueRules) lines.push('UNIQUE: sourceAlertKey is non-null; linked=alert:<sourceAlertId>; standalone=standalone:<reportId>; never build UNIQUE on sourceAlertId.');
     lines.push('');
   }
-  lines.push('Read-only verification must validate only this env and these four collections: fields/records, Date types, version/lifecycle, exact index order and UNIQUE, and ACL.');
-  lines.push('Do not create a probe record to test capability. If read-only evidence is insufficient, STOP and report the unknown capability.');
+  lines.push('Read-only verification must validate only this env and these four collections: existence, documentCount=0, exact index count/order and UNIQUE, and ACL.');
+  lines.push('Do not create a probe record to test fields, Date, version, or state logic. If read-only evidence is insufficient, STOP and report the unknown capability.');
   return `${lines.join('\n')}\n`;
 }
 function generate() {
