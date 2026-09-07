@@ -69,6 +69,10 @@ function isBoundToTrustedOpenId(user, trustedOpenId) {
   return isConsistentBoundIdentity(user) && user.wxOpenId === trustedOpenId;
 }
 
+function actorCollegeId(user) {
+  return user.role === 'security' ? null : (user.collegeId || null);
+}
+
 function isExpectedUnboundIdentity(user) {
   return user.bindStatus === 'unbound' &&
     user.wxOpenId === null &&
@@ -124,12 +128,28 @@ function createAuditLog({ user, requestId, serverDate, createAuditId }) {
     _id: createAuditId(),
     actorId: user._id,
     actorRole: user.role,
-    actorCollegeId: user.collegeId || null,
+    actorCollegeId: actorCollegeId(user),
     action: 'identity.bind',
     resourceType: 'user',
     resourceId: user._id,
     result: 'success',
     afterSummary: { bindStatus: 'bound' },
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
+function createFailureAuditLog({ user, code, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId: user._id,
+    actorRole: user.role,
+    actorCollegeId: actorCollegeId(user),
+    action: 'identity.bind',
+    resourceType: 'user',
+    resourceId: user._id,
+    result: 'failure',
+    failureReason: code,
     requestId,
     createdAt: serverDate(),
   };
@@ -171,6 +191,17 @@ function createHandler({
   return async function bindMiniProgramIdentity(event) {
     const requestId = createRequestId();
     let resourceId = null;
+    const auditedExistingBindingFailure = async (user, code, message) => {
+      try {
+        await db.collection('audit_logs').add({
+          data: createFailureAuditLog({ user, code, requestId, serverDate, createAuditId }),
+        });
+        return failure(code, message);
+      } catch (error) {
+        logger.error({ requestId, code: 'INTERNAL_ERROR', resourceId: user._id, stage: 'existingBindingAudit' });
+        return failure('INTERNAL_ERROR', '服务暂时不可用，请稍后重试');
+      }
+    };
     try {
       if (bindingMode() !== 'demo') {
         return failure('BINDING_DISABLED', '当前环境未开启演示身份绑定');
@@ -194,7 +225,11 @@ function createHandler({
       const existingBinding = await findOne(db, { wxIdentityKey: expectedWxIdentityKey });
       if (existingBinding) {
         resourceId = existingBinding._id;
-        return validateExistingBinding(existingBinding, wxContext.OPENID);
+        const existingResult = validateExistingBinding(existingBinding, wxContext.OPENID);
+        if (!existingResult.ok) {
+          return auditedExistingBindingFailure(existingBinding, existingResult.code, existingResult.message);
+        }
+        return existingResult;
       }
 
       const identityKey = `${input.role === 'student' ? 'student' : 'counselor'}:${input.identityNo}`;
@@ -266,7 +301,7 @@ function createHandler({
         : isTransactionConflict(error)
           ? 'CONFLICT'
           : 'INTERNAL_ERROR';
-      logger.error({ requestId, code, resourceId });
+      logger.error({ requestId, code, resourceId, stage: 'binding' });
       return failure(code, code === 'INTERNAL_ERROR' ? '服务暂时不可用，请稍后重试' : '操作未完成，请重试');
     }
   };
@@ -274,7 +309,7 @@ function createHandler({
 
 function createDefaultHandler(cloud = require('wx-server-sdk')) {
   // 此验证方式仅供课程演示；真实上线必须替换为可信身份核验方案。
-  // DEPLOYMENT BLOCKED UNTIL audit_logs EXISTS: binding and login/denial audit policy is incomplete.
+  // Deployment requires reviewed audit behavior and target audit_logs availability.
   // Before a trusted actor can be resolved, only the desensitized runtime log is permitted.
   cloud.init({ env: TARGET_ENV_ID });
   const db = cloud.database();
@@ -291,6 +326,7 @@ exports.__testables = {
   createHandler,
   createDefaultHandler,
   createAuditLog,
+  createFailureAuditLog,
   validateInput,
   toProfile,
   EXPECTED_APP_ID,

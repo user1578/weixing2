@@ -110,8 +110,8 @@ function createMockDb(users = [], options = {}) {
   return { db, state };
 }
 
-function makeSession(users, wxContext) {
-  const { db, state } = createMockDb(users);
+function makeSession(users, wxContext, options = {}) {
+  const { db, state } = createMockDb(users, options);
   const logs = [];
   return {
     state,
@@ -119,8 +119,10 @@ function makeSession(users, wxContext) {
     handler: session.__testables.createHandler({
       db,
       getWXContext: () => wxContext,
+      serverDate: () => ({ $serverDate: true }),
       logger: { error: (entry) => logs.push(entry) },
       createRequestId: () => 'req-session',
+      createAuditId: () => 'audit_session_001',
     }),
   };
 }
@@ -365,4 +367,172 @@ test('32. 两个默认 handler 都固定使用 TARGET_ENV_ID', () => {
   assert.deepEqual(bindCalls, [{ env: binding.__testables.TARGET_ENV_ID }]);
   assert.equal(session.__testables.TARGET_ENV_ID, 'aa-d4gvb4o3t50fc94f8');
   assert.equal(binding.__testables.TARGET_ENV_ID, 'aa-d4gvb4o3t50fc94f8');
+});
+
+test('33. 可信 security session 失败写审计', async () => {
+  const user = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const { handler, state } = makeSession([user], trustedContext);
+  assert.equal((await handler()).code, 'FORBIDDEN');
+  assert.deepEqual(state.audits[0], { _id: 'audit_session_001', actorId: user._id, actorRole: 'security', actorCollegeId: null, action: 'identity.session', resourceType: 'user', resourceId: user._id, result: 'failure', failureReason: 'FORBIDDEN', requestId: 'req-session', createdAt: { $serverDate: true } });
+});
+
+test('34. 可信未知角色 session 失败写审计', async () => {
+  const user = baseUser({ role: 'other', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const { handler, state } = makeSession([user], trustedContext);
+  assert.equal((await handler()).code, 'FORBIDDEN');
+  assert.equal(state.audits[0].failureReason, 'FORBIDDEN');
+});
+
+test('35. 可信 inactive session 失败写审计', async () => {
+  const user = baseUser({ status: 'suspended', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const { handler, state } = makeSession([user], trustedContext);
+  assert.equal((await handler()).code, 'ACCOUNT_DISABLED');
+  assert.equal(state.audits[0].failureReason, 'ACCOUNT_DISABLED');
+});
+
+test('36. 可信绑定一致性异常 session 写 INTERNAL_ERROR 审计', async () => {
+  const user = baseUser({ wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'other-openid', bindStatus: 'bound' });
+  const { handler, state } = makeSession([user], trustedContext);
+  assert.equal((await handler()).code, 'INTERNAL_ERROR');
+  assert.equal(state.audits[0].failureReason, 'INTERNAL_ERROR');
+});
+
+test('37. session failure audit 不含 OPENID、替身键或完整用户', async () => {
+  const user = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const { handler, state } = makeSession([user], trustedContext);
+  await handler();
+  const auditJson = JSON.stringify(state.audits[0]);
+  for (const secret of ['trusted-openid', 'wxOpenId', 'wxIdentityKey', 'identityKey', 'studentNo', '张三']) assert.equal(auditJson.includes(secret), false);
+  assert.equal(state.audits[0].failureReason, 'FORBIDDEN');
+  assert.equal(state.audits[0].requestId, 'req-session');
+});
+
+test('38. session 必须审计路径的 audit 写失败时 fail closed', async () => {
+  const user = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const { handler, state, logs } = makeSession([user], trustedContext, { auditFailure: true });
+  assert.equal((await handler()).code, 'INTERNAL_ERROR');
+  assert.equal(state.audits.length, 0);
+  assert.deepEqual(logs[0], { requestId: 'req-session', code: 'INTERNAL_ERROR', resourceId: user._id, stage: 'sessionRole' });
+});
+
+test('39. session AppID 不匹配不写 audit', async () => {
+  const { handler, state } = makeSession([], { OPENID: 'trusted-openid', APPID: 'wrong-appid' });
+  assert.equal((await handler()).code, 'FORBIDDEN');
+  assert.equal(state.audits.length, 0);
+});
+
+test('40. session OPENID 缺失不写 audit', async () => {
+  const { handler, state } = makeSession([], { APPID: 'wxe262970211858262' });
+  assert.equal((await handler()).code, 'INTERNAL_ERROR');
+  assert.equal(state.audits.length, 0);
+});
+
+test('41. session 无用户 UNBOUND 不写 audit', async () => {
+  const { handler, state } = makeSession([], trustedContext);
+  assert.equal((await handler()).code, 'UNBOUND');
+  assert.equal(state.audits.length, 0);
+});
+
+test('42. 正常 BOUND session 仍只返回最小 profile 且不写成功审计', async () => {
+  const user = baseUser({ wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound', passwordHash: 'secret', mobile: '13800138000' });
+  const { handler, state } = makeSession([user], trustedContext);
+  const response = await handler();
+  assert.deepEqual(Object.keys(response.profile).sort(), ['collegeId', 'focusFlag', 'name', 'role', 'userId']);
+  assert.equal(JSON.stringify(response).includes('trusted-openid'), false);
+  assert.equal(state.audits.length, 0);
+});
+
+test('43. 成功绑定保留用户更新与 success audit 的同一事务', async () => {
+  const { handler, state } = makeBinding([baseUser()], trustedContext);
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'BOUND');
+  assert.equal(state.transactionCalls, 1);
+  assert.equal(state.audits[0].action, 'identity.bind');
+  assert.equal(state.audits[0].result, 'success');
+  assert.deepEqual(state.audits[0].afterSummary, { bindStatus: 'bound' });
+  assert.equal(JSON.stringify(state.audits[0]).includes('trusted-openid'), false);
+});
+
+test('44. 成功绑定 success audit 写失败时事务回滚', async () => {
+  const { handler, state } = makeBinding([baseUser()], trustedContext, { auditFailure: true });
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
+  assert.equal(state.users[0].bindStatus, 'unbound');
+  assert.equal(state.audits.length, 0);
+});
+
+test('45. existingBinding 可信 security 失败写审计', async () => {
+  const user = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const { handler, state } = makeBinding([user], trustedContext);
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'FORBIDDEN');
+  assert.equal(state.audits[0].action, 'identity.bind');
+  assert.equal(state.audits[0].failureReason, 'FORBIDDEN');
+  assert.equal(state.audits[0].actorCollegeId, null);
+});
+
+test('46. existingBinding inactive 失败写审计', async () => {
+  const user = baseUser({ status: 'suspended', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const { handler, state } = makeBinding([user], trustedContext);
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'ACCOUNT_DISABLED');
+  assert.equal(state.audits[0].failureReason, 'ACCOUNT_DISABLED');
+});
+
+test('47. existingBinding 绑定一致性异常写 INTERNAL_ERROR 审计', async () => {
+  const user = baseUser({ wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'other-openid', bindStatus: 'bound' });
+  const { handler, state } = makeBinding([user], trustedContext);
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
+  assert.equal(state.audits[0].failureReason, 'INTERNAL_ERROR');
+});
+
+test('48. existingBinding failure audit 写失败时 fail closed', async () => {
+  const user = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const { handler, state, logs } = makeBinding([user], trustedContext, { auditFailure: true });
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
+  assert.equal(state.audits.length, 0);
+  assert.deepEqual(logs[0], { requestId: 'req-bind', code: 'INTERNAL_ERROR', resourceId: user._id, stage: 'existingBindingAudit' });
+});
+
+test('49. 首次绑定 IDENTITY_NOT_FOUND 不伪造 actor audit', async () => {
+  const { handler, state } = makeBinding([], trustedContext);
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'IDENTITY_NOT_FOUND');
+  assert.equal(state.audits.length, 0);
+});
+
+test('50. 首次绑定 IDENTITY_MISMATCH 不把目标档案作为 actor audit', async () => {
+  const { handler, state } = makeBinding([baseUser()], trustedContext);
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '李四' })).code, 'IDENTITY_MISMATCH');
+  assert.equal(state.audits.length, 0);
+});
+
+test('51. 目标已被其他微信绑定不把目标档案作为 actor audit', async () => {
+  const target = baseUser({ bindStatus: 'bound', wxOpenId: 'other-openid', wxIdentityKey: 'openid:other-openid' });
+  const { handler, state } = makeBinding([target], trustedContext);
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'ACCOUNT_ALREADY_BOUND');
+  assert.equal(state.audits.length, 0);
+});
+
+test('52. bind AppID 不匹配不写 actor audit', async () => {
+  const { handler, state } = makeBinding([baseUser()], { OPENID: 'trusted-openid', APPID: 'wrong-appid' });
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'FORBIDDEN');
+  assert.equal(state.audits.length, 0);
+});
+
+test('53. event 中伪造身份字段不能影响 trusted context', async () => {
+  const { handler, state } = makeBinding([baseUser()], trustedContext);
+  const response = await handler({ role: 'student', identityNo: '20230001', name: '张三', openid: 'spoofed', userId: 'usr_attacker', actorId: 'usr_attacker' });
+  assert.equal(response.code, 'INVALID_INPUT');
+  assert.equal(state.users[0].wxOpenId, null);
+  assert.equal(state.audits.length, 0);
+});
+
+test('54. runtime logger payload 不含 OPENID 或完整 event', async () => {
+  const sessionUser = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const sessionRun = makeSession([sessionUser], trustedContext, { auditFailure: true });
+  await sessionRun.handler({ openid: 'spoofed' });
+  const bindingUser = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const bindingRun = makeBinding([bindingUser], trustedContext, { auditFailure: true });
+  await bindingRun.handler({ role: 'student', identityNo: '20230001', name: '张三' });
+  for (const entry of [...sessionRun.logs, ...bindingRun.logs]) {
+    assert.deepEqual(Object.keys(entry).sort(), ['code', 'requestId', 'resourceId', 'stage']);
+    const runtimeJson = JSON.stringify(entry);
+    for (const secret of ['trusted-openid', 'openid', 'wxOpenId', 'identityNo', '张三']) assert.equal(runtimeJson.includes(secret), false);
+  }
 });
