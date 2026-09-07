@@ -9,17 +9,19 @@ function formatIndex(index) { return `${index.unique ? 'UNIQUE ' : ''}${index.na
 function buildInstructions(plan) {
   const lines = [
     'C-GROUP CLOUDBASE IMPLEMENTATION INSTRUCTIONS', '', `Only permitted environment: ${plan.envId}.`,
+    `Current deployment status: ${plan.implementationStatus.status}.`,
+    'This material is for idempotent recovery and read-only re-verification only; it is not an initial implementation instruction.',
     'Scope is strictly and only: learning_articles, quiz_questions, quiz_attempts, learning_records, audit_logs.',
-    'Before implementation, use read-only inventory to confirm A group remains: colleges, users, risk_rules; and B group remains: alerts, fraud_reports, counselor_followups, security_dispositions.',
+    'Before re-verification, use read-only inventory to confirm A group remains: colleges, users, risk_rules; and B group remains: alerts, fraud_reports, counselor_followups, security_dispositions.',
     'Do not modify any A- or B-group collection, indexes, ACL, data, function, or identity deployment.',
     'Do not deploy cloud functions. Do not enter production identity deployment. Do not create probe, test, temp resources, documents, collections, or indexes.',
-    'CloudBase has no fixed physical field schema for empty collections: create and verify only collection, exact indexes, and ADMINONLY ACL. Fields, Date, version, append-only, and response-security rules are static plan contracts; never use a document to probe them.',
-    'For each collection, first read only its existence, indexes, ACL, and documentCount. If existing and exact, verify then SKIP. If existing but different, STOP and report; never overwrite. If absent during approved implementation, create only that planned collection with its listed indexes and ADMINONLY ACL.',
+    'CloudBase has no fixed physical field schema for empty collections. Fields, Date, version, append-only, and response-security rules are static plan contracts; never use a document to probe them.',
+    'For each collection, first read only its existence, indexes, ACL, and documentCount. If existing and exact, verify then SKIP. If existing but different, STOP and report. If missing, STOP and report. Never recreate, overwrite, or repair a missing resource automatically.',
     'No initialization data in this round: all five collections must remain documentCount=0. Do not delete records if a nonzero count is found; STOP and report. De-identified article/question seeds are a later separately approved scope only.', ''
   ];
   for (const name of plan.creationOrder) {
     const item = plan.collections.find((entry) => entry.collectionName === name);
-    lines.push(`CREATE ORDER ${plan.creationOrder.indexOf(name) + 1}: ${name}`);
+    lines.push(`FROZEN COLLECTION ${plan.creationOrder.indexOf(name) + 1}: ${name}`);
     lines.push(`Static fields (not physical schema): ${item.fields.join(', ')}`);
     lines.push(`Required: ${item.requiredFields.join(', ') || '(none)'}; nullable: ${item.nullableFields.join(', ') || '(none)'}; conditional: ${JSON.stringify(item.conditionalRequiredFields)}.`);
     lines.push(`Date: ${item.dateFields.join(', ')}; serverTimestamp: ${item.serverTimestampFields.join(', ')}.`);
@@ -33,7 +35,7 @@ function buildInstructions(plan) {
     if (name === 'audit_logs') lines.push('Audit contract: actorId is server-derived; actorCollegeId is nullable and null for security; only result=success/failure; failureReason only for failures; summaries are minimum state only and must never contain full sensitive text; no complete action enum is invented.');
     lines.push('');
   }
-  lines.push('Acceptance is read-only: verify this env, exactly these five collections, existence, documentCount=0, exact index field order/UNIQUE, and ADMINONLY ACL. A missing collection at acceptance is a failure. Never rely on sampleDocuments or add them.');
+  lines.push('audit_logs is formally present, but never insert an audit record manually. Acceptance is read-only: verify this env, exactly these five collections, existence, documentCount=0, exact index field order/UNIQUE, and ADMINONLY ACL. A missing collection at acceptance is a failure. Never rely on sampleDocuments or add them.');
   return `${lines.join('\n')}\n`;
 }
 function generate() { const plan = JSON.parse(fs.readFileSync(PLAN_PATH, 'utf8')); validatePlan(plan); fs.writeFileSync(OUTPUT_PATH, buildInstructions(plan), 'utf8'); console.log('C-group instructions generated'); }

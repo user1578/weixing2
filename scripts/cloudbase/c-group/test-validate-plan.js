@@ -37,3 +37,13 @@ test('21. 正确空集合 snapshot 通过', () => assert.equal(verifySnapshot(va
 test('22. snapshot 独立索引列表重新排序仍通过', () => { const snapshot = validSnapshot(); collection(snapshot, 'learning_records').indexes.reverse(); assert.equal(verifySnapshot(snapshot, plan), true); });
 test('23. snapshot 组合 UNIQUE 内部字段重新排序失败', () => { const snapshot = validSnapshot(); collection(snapshot, 'learning_records').indexes[0].fields.reverse(); assert.throws(() => verifySnapshot(snapshot, plan)); });
 test('24. 生成说明与文件字节一致', () => assert.equal(fs.readFileSync(path.join(__dirname, 'WORKBUDDY-C-GROUP.txt'), 'utf8'), buildInstructions(plan)));
+test('25. 正确 PASSED implementationStatus 通过', () => assert.equal(validatePlan(plan), plan));
+test('26. implementationStatus.status=PREPARED 失败', () => reject((p) => { p.implementationStatus.status = 'PREPARED'; }));
+test('27. remediationRequired=true 失败', () => reject((p) => { p.implementationStatus.remediationRequired = true; }));
+test('28. blockNextGroup=true 失败', () => reject((p) => { p.implementationStatus.blockNextGroup = true; }));
+test('29. knownIssue 非 null 失败', () => reject((p) => { p.implementationStatus.knownIssue = 'pending remediation'; }));
+test('30. currentCloudBaseState.learning_articles=1 失败', () => reject((p) => { p.implementationStatus.currentCloudBaseState.learning_articles = 1; }));
+test('31. currentCloudBaseState.audit_logs=1 失败', () => reject((p) => { p.implementationStatus.currentCloudBaseState.audit_logs = 1; }));
+test('32. currentCloudBaseState.customIndexCount=9 失败', () => reject((p) => { p.implementationStatus.currentCloudBaseState.customIndexCount = 9; }));
+test('33. PASSED 状态下 missing=create_after_read_only_check 失败', () => reject((p) => { p.idempotencyPolicy.missing = 'create_after_read_only_check'; }));
+test('34. 非 PASSED plan 不得进入快照验收', () => { const prepared = copyPlan(); prepared.implementationStatus.status = 'PREPARED'; assert.throws(() => verifySnapshot(validSnapshot(), prepared)); });

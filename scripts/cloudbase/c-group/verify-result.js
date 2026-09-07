@@ -11,6 +11,7 @@ function snapshotArgument(args) { const index = args.indexOf('--snapshot'); if (
 function signature(index) { return index.fields.map((field) => `${field.field}:${field.order}${index.unique ? ':unique' : ''}`).join('|'); }
 function verifySnapshot(snapshot, suppliedPlan) {
   const plan = validatePlan(suppliedPlan);
+  assert(plan.implementationStatus.status === 'PASSED', 'Plan must be PASSED before read-only acceptance');
   assert(snapshot.envId === ENV_ID, `Snapshot envId must be ${ENV_ID}`);
   assert(Array.isArray(snapshot.collections) && snapshot.collections.length === COLLECTIONS.length, 'Snapshot must contain exactly five planned C-group collections');
   assert(new Set(snapshot.collections.map((item) => item.collectionName)).size === COLLECTIONS.length, 'Snapshot collections must not contain duplicates');

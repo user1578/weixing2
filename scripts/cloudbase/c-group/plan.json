@@ -9,16 +9,25 @@
     "staticContracts": ["fields", "requiredness", "Date", "fieldSources", "enums", "version", "appendOnly", "responseSecurity"]
   },
   "implementationStatus": {
-    "status": "PREPARED",
-    "scope": "Static implementation preparation only; no CloudBase resource has been operated by this plan.",
-    "currentCloudBaseState": null
+    "status": "PASSED",
+    "remediationRequired": false,
+    "blockNextGroup": false,
+    "knownIssue": null,
+    "currentCloudBaseState": {
+      "learning_articles": 0,
+      "quiz_questions": 0,
+      "quiz_attempts": 0,
+      "learning_records": 0,
+      "audit_logs": 0,
+      "customIndexCount": 10
+    }
   },
   "allowedCollections": ["learning_articles", "quiz_questions", "quiz_attempts", "learning_records", "audit_logs"],
   "creationOrder": ["learning_articles", "quiz_questions", "quiz_attempts", "learning_records", "audit_logs"],
   "idempotencyPolicy": {
     "existingExactMatch": "verify_and_skip",
     "existingMismatch": "stop_and_report",
-    "missingDuringImplementation": "create_after_read_only_check",
+    "missing": "stop_and_report",
     "missingDuringAcceptance": "fail",
     "forbiddenProbeCollectionNames": ["__probe__", "probe", "test", "temp"]
   },

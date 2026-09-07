@@ -102,8 +102,8 @@ function validatePlan(plan = readPlan()) {
   equal(plan.envId, ENV_ID, 'envId'); equal(plan.group, 'C', 'group'); equal(plan.serverTimestampMarker, 'serverTimestamp', 'serverTimestampMarker');
   same(plan.allowedCollections, COLLECTIONS, 'allowedCollections'); same(plan.creationOrder, COLLECTIONS, 'creationOrder');
   same(plan.cloudBaseCollectionModel, { hasFixedPhysicalFieldSchema: false, physicalResources: ['collection', 'indexes', 'acl'], staticContracts: ['fields', 'requiredness', 'Date', 'fieldSources', 'enums', 'version', 'appendOnly', 'responseSecurity'] }, 'cloudBaseCollectionModel');
-  same(plan.implementationStatus, { status: 'PREPARED', scope: 'Static implementation preparation only; no CloudBase resource has been operated by this plan.', currentCloudBaseState: null }, 'implementationStatus');
-  same(plan.idempotencyPolicy, { existingExactMatch: 'verify_and_skip', existingMismatch: 'stop_and_report', missingDuringImplementation: 'create_after_read_only_check', missingDuringAcceptance: 'fail', forbiddenProbeCollectionNames: ['__probe__', 'probe', 'test', 'temp'] }, 'idempotencyPolicy');
+  same(plan.implementationStatus, { status: 'PASSED', remediationRequired: false, blockNextGroup: false, knownIssue: null, currentCloudBaseState: { learning_articles: 0, quiz_questions: 0, quiz_attempts: 0, learning_records: 0, audit_logs: 0, customIndexCount: 10 } }, 'implementationStatus');
+  same(plan.idempotencyPolicy, { existingExactMatch: 'verify_and_skip', existingMismatch: 'stop_and_report', missing: 'stop_and_report', missingDuringAcceptance: 'fail', forbiddenProbeCollectionNames: ['__probe__', 'probe', 'test', 'temp'] }, 'idempotencyPolicy');
   assert(Array.isArray(plan.initializationPolicy.documents) && plan.initializationPolicy.documents.length === 0, 'initializationPolicy.documents must be empty');
   same(plan.initializationPolicy.deferredApprovedScope, ['learning_articles', 'quiz_questions'], 'deferredApprovedScope');
   assert(plan.collections.length === COLLECTIONS.length, 'C group must contain exactly five collections');
@@ -122,6 +122,9 @@ function validatePlan(plan = readPlan()) {
   equal(audit.sensitiveConstraints.actorCollegeId, 'event snapshot; null for security', 'audit_logs actorCollegeId constraint');
   const totalIndexes = plan.collections.reduce((sum, item) => sum + item.indexes.length, 0);
   equal(totalIndexes, 10, 'C-group custom index count');
+  const cloudState = plan.implementationStatus.currentCloudBaseState;
+  for (const name of COLLECTIONS) equal(cloudState[name], byName(plan, name).expectedDocumentCount, `currentCloudBaseState.${name}`);
+  equal(cloudState.customIndexCount, totalIndexes, 'currentCloudBaseState.customIndexCount');
   const uniqueIndexes = plan.collections.flatMap((item) => item.indexes.filter((index) => index.unique).map((index) => `${item.collectionName}:${indexSignature(index)}`));
   same(uniqueIndexes, ['learning_records:studentId:asc:unique|articleId:asc:unique'], 'C-group UNIQUE indexes');
   assertNoSensitiveMaterial(plan);
