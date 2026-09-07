@@ -1,8 +1,37 @@
 <view class="container">
-  <view class="title">联通测试</view>
-  <view class="top_tip">正式业务首页尚未开发</view>
+  <view class="title">身份联调测试</view>
+  <view class="top_tip">仅用于当前开发阶段，后续会替换为正式页面</view>
+
+  <view class="identity_test">
+    <view class="section_title">小程序身份状态</view>
+    <button class="primary_button" bindtap="checkIdentityStatus" loading="{{sessionLoading}}" disabled="{{sessionLoading || bindLoading}}">检查身份状态</button>
+    <view class="status_result" wx:if="{{sessionCode}}">
+      <view>状态码：{{sessionCode}}</view>
+      <view>{{message}}</view>
+    </view>
+    <view class="profile" wx:if="{{sessionCode === 'BOUND' && profile}}">
+      <view class="profile_title">最小 profile</view>
+      <view>userId：{{profile.userId}}</view>
+      <view>role：{{profile.role}}</view>
+      <view>name：{{profile.name}}</view>
+      <view>collegeId：{{profile.collegeId}}</view>
+      <view>focusFlag：{{profile.focusFlag}}</view>
+    </view>
+    <view class="bind_form" wx:if="{{sessionCode === 'UNBOUND'}}">
+      <view class="form_title">绑定演示身份</view>
+      <view class="field_label">角色</view>
+      <picker mode="selector" range="{{roleOptions}}" value="{{roleIndex}}" bindchange="onRoleChange"><view class="field_value">{{role}}</view></picker>
+      <view class="field_label">身份编号</view>
+      <input class="field_input" value="{{identityNo}}" placeholder="学生填 studentNo；辅导员填 staffNo" bindinput="onIdentityNoInput" />
+      <view class="field_label">姓名</view>
+      <input class="field_input" value="{{name}}" placeholder="输入演示身份姓名" bindinput="onNameInput" />
+      <button class="primary_button bind_button" bindtap="bindIdentity" loading="{{bindLoading}}" disabled="{{bindLoading || sessionLoading}}">绑定演示身份</button>
+      <view class="bind_result" wx:if="{{bindCode}}">绑定结果：{{bindCode}}</view>
+    </view>
+  </view>
+
   <view class="ping_test">
-    <view class="ping_test_title">CloudBase 联通测试</view>
+    <view class="section_title">CloudBase 联通测试</view>
     <button class="ping_test_button" bindtap="testCloudbaseConnection">测试CloudBase连接</button>
     <view class="ping_result" wx:if="{{pingResult}}">
       <view>ok：{{pingResult.ok}}</view>

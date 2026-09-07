@@ -22,20 +22,26 @@ page {
   margin-bottom: 28rpx;
 }
 
+.identity_test,
 .ping_test {
   width: 100%;
   box-sizing: border-box;
   padding: 28rpx 25rpx;
-  border-radius: 5px;
+  border-radius: 10rpx;
   background-color: #fff;
 }
 
-.ping_test_title {
+.ping_test {
+  margin-top: 24rpx;
+}
+
+.section_title {
   font-size: 32rpx;
   color: #000;
   margin-bottom: 20rpx;
 }
 
+.primary_button,
 .ping_test_button {
   margin: 0;
   background-color: #07c160;
@@ -43,14 +49,19 @@ page {
   font-size: 28rpx;
 }
 
+.status_result,
+.bind_result,
 .ping_result,
-.ping_error {
+.ping_error,
+.profile {
   margin-top: 20rpx;
   font-size: 26rpx;
   line-height: 1.8;
   word-break: break-all;
 }
 
+.status_result,
+.bind_result,
 .ping_result {
   color: #07c160;
 }
@@ -60,8 +71,39 @@ page {
 }
 
 
-.environment {
-  color: rgba(0, 0, 0, 0.4);
+.profile,
+.bind_form {
+  margin-top: 24rpx;
+  padding-top: 24rpx;
+  border-top: 1rpx solid #eee;
+}
+
+.profile_title,
+.form_title {
+  font-size: 28rpx;
+  color: #222;
+  margin-bottom: 14rpx;
+}
+
+.field_label {
+  margin-top: 18rpx;
+  margin-bottom: 10rpx;
+  font-size: 26rpx;
+  color: #444;
+}
+
+.field_value,
+.field_input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 72rpx;
+  padding: 16rpx 18rpx;
+  border: 1rpx solid #d9d9d9;
+  border-radius: 8rpx;
+  color: #222;
   font-size: 24rpx;
-  margin-top: 25%;
+}
+
+.bind_button {
+  margin-top: 28rpx;
 }
