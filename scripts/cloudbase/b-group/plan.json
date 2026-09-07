@@ -13,6 +13,19 @@
     "physicalResources": ["collection", "indexes", "acl"],
     "staticContracts": ["fields", "requiredness", "Date", "version", "stateMachine"]
   },
+  "implementationStatus": {
+    "status": "PASSED",
+    "remediationRequired": false,
+    "blockNextGroup": false,
+    "knownIssue": null,
+    "currentCloudBaseState": {
+      "alerts": 0,
+      "fraud_reports": 0,
+      "counselor_followups": 0,
+      "security_dispositions": 0,
+      "customIndexCount": 12
+    }
+  },
   "allowedCollections": [
     "alerts",
     "fraud_reports",
@@ -28,7 +41,7 @@
   "idempotencyPolicy": {
     "existingExactMatch": "verify_and_skip",
     "existingMismatch": "stop_and_report",
-    "missing": "create_from_plan",
+    "missing": "stop_and_report",
     "forbiddenProbeCollectionNames": [
       "__probe__",
       "probe",

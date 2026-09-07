@@ -120,3 +120,33 @@ test('17. 生成说明与已生成文件字节一致', () => {
   const current = fs.readFileSync(path.join(ROOT, 'WORKBUDDY-B-GROUP.txt'), 'utf8');
   assert.equal(current, generated);
 });
+
+test('18. implementationStatus.status=PARTIAL 必须失败', () => {
+  assertPlanRejected((mutated) => { mutated.implementationStatus.status = 'PARTIAL'; });
+});
+
+test('19. implementationStatus.remediationRequired=true 必须失败', () => {
+  assertPlanRejected((mutated) => { mutated.implementationStatus.remediationRequired = true; });
+});
+
+test('20. implementationStatus.blockNextGroup=true 必须失败', () => {
+  assertPlanRejected((mutated) => { mutated.implementationStatus.blockNextGroup = true; });
+});
+
+test('21. implementationStatus.knownIssue 非 null 必须失败', () => {
+  assertPlanRejected((mutated) => { mutated.implementationStatus.knownIssue = 'pending remediation'; });
+});
+
+test('22. implementationStatus 任一集合 count 非零必须失败', () => {
+  assertPlanRejected((mutated) => { mutated.implementationStatus.currentCloudBaseState.alerts = 1; });
+});
+
+test('23. implementationStatus.customIndexCount 非 12 必须失败', () => {
+  assertPlanRejected((mutated) => { mutated.implementationStatus.currentCloudBaseState.customIndexCount = 11; });
+});
+
+test('24. 非 PASSED plan 不得进入快照验收', () => {
+  const partialPlan = copyPlan();
+  partialPlan.implementationStatus.status = 'PARTIAL';
+  assert.throws(() => verifySnapshot(validSnapshot(), partialPlan));
+});

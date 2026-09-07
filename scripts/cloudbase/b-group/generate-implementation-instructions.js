@@ -11,18 +11,23 @@ function formatIndex(index) {
   return `${index.unique ? 'UNIQUE ' : ''}${index.name}: ${index.fields.map((field) => `${field.field} ${field.order}`).join(', ')}`;
 }
 function buildInstructions(plan) {
+  const implementationStatus = plan.implementationStatus;
+  const cloudState = implementationStatus.currentCloudBaseState;
   const lines = [
     'B-GROUP CLOUDBASE IMPLEMENTATION INSTRUCTIONS',
     '',
     `Only permitted environment: ${plan.envId}`,
-    'This material is a plan only. Do not deploy cloud functions and do not enter C group.',
+    `Current deployment status: ${implementationStatus.status}.`,
+    'This material is for idempotent recovery and read-only re-verification.',
+    'B group has been formally implemented. Do not deploy cloud functions and do not enter C group.',
     'Never create probe, test, temp, or other out-of-plan collections.',
     'CloudBase collections have no fixed physical field schema. Do not claim to create or verify a field schema in an empty collection.',
-    'Physical implementation creates or verifies only: collection, indexes, and ACL. Fields, requiredness, Date, version, and state machines are static source/plan contracts validated by validate-plan.js.',
+    'Read-only re-verification checks only: collection existence, indexes, ACL, and documentCount. Fields, requiredness, Date, version, and state machines are static source/plan contracts validated by validate-plan.js.',
     'Before every target collection: read its existence, indexes, ACL, and documentCount only. Do not insert a probe, test, or temporary document.',
-    'Existing and exact: verify then SKIP. Existing but different: STOP and report. Missing: create exactly from this plan.',
+    'Every subsequent run must start with read-only verification. Existing and exact: verify then SKIP. Existing but different or missing: STOP and report. Do not recreate or overwrite.',
     'Client read=false and client write=false are mandatory for every B-group collection.',
-    'No B-group business records are initialized by this plan. Final B-group acceptance requires documentCount=0 for every collection. If any count is nonzero, STOP and report; never delete data to make acceptance pass.',
+    `Recorded PASSED state: alerts=${cloudState.alerts}; fraud_reports=${cloudState.fraud_reports}; counselor_followups=${cloudState.counselor_followups}; security_dispositions=${cloudState.security_dispositions}; customIndexCount=${cloudState.customIndexCount}.`,
+    'No B-group business records are initialized or inserted by this material. Final B-group acceptance requires documentCount=0 for every collection. If any count is nonzero, STOP and report; never delete data to make acceptance pass.',
     'Any future approved seed requires a separate authorization and validation plan; do not add one here.',
     ''
   ];
@@ -43,7 +48,7 @@ function buildInstructions(plan) {
     if (item.uniqueRules) lines.push('UNIQUE: sourceAlertKey is non-null; linked=alert:<sourceAlertId>; standalone=standalone:<reportId>; never build UNIQUE on sourceAlertId.');
     lines.push('');
   }
-  lines.push('Read-only verification must validate only this env and these four collections: existence, documentCount=0, exact index count/order and UNIQUE, and ACL.');
+  lines.push('Read-only re-verification must validate only this env and these four collections: existence, documentCount=0, exact index count/order and UNIQUE, and ACL. It may proceed only while implementationStatus is PASSED.');
   lines.push('Do not create a probe record to test fields, Date, version, or state logic. If read-only evidence is insufficient, STOP and report the unknown capability.');
   return `${lines.join('\n')}\n`;
 }

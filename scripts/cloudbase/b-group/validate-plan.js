@@ -6,8 +6,22 @@ const path = require('path');
 const PLAN_PATH = path.join(__dirname, 'plan.json');
 const ENV_ID = 'aa-d4gvb4o3t50fc94f8';
 const COLLECTIONS = ['alerts', 'fraud_reports', 'counselor_followups', 'security_dispositions'];
+const CUSTOM_INDEX_COUNT = 12;
 const FRAUD_TYPES = ['part_time_scam', 'impersonate_public', 'fake_loan', 'fake_refund', 'other'];
 const RISK_LEVELS = ['low', 'medium', 'high'];
+const FROZEN_IMPLEMENTATION_STATUS = {
+  status: 'PASSED',
+  remediationRequired: false,
+  blockNextGroup: false,
+  knownIssue: null,
+  currentCloudBaseState: {
+    alerts: 0,
+    fraud_reports: 0,
+    counselor_followups: 0,
+    security_dispositions: 0,
+    customIndexCount: CUSTOM_INDEX_COUNT
+  }
+};
 const FROZEN_FIELDS = {
   alerts: ['_id', 'sourceType', 'sourceReference', 'studentId', 'collegeId', 'fraudType', 'content', 'riskLevel', 'riskReasons', 'riskRuleId', 'status', 'issuedBy', 'issuedAt', 'readAt', 'closedAt', 'closeReason', 'version', 'createdAt', 'updatedAt'],
   fraud_reports: ['_id', 'studentId', 'collegeId', 'sourceAlertId', 'sourceAlertKey', 'fraudType', 'incidentAt', 'involvedAmount', 'hasLoss', 'incidentNarrative', 'suspiciousPlatform', 'suspiciousAccount', 'stillContacting', 'contactPhone', 'studentRemark', 'riskLevel', 'riskReasons', 'riskRuleId', 'status', 'currentHandlerId', 'finalOutcome', 'confirmedLossAmount', 'closeReason', 'submittedAt', 'closedAt', 'version', 'createdAt', 'updatedAt'],
@@ -159,6 +173,18 @@ function validateEnums(item) {
   if (expectedStatus[item.collectionName]) sameArray(item.enums.status, expectedStatus[item.collectionName], `${item.collectionName}.status enum`);
   if (item.collectionName === 'security_dispositions') sameArray(item.enums.action, ['verify', 'start_process', 'return', 'close'], 'security_dispositions.action enum');
 }
+function validateImplementationStatus(plan) {
+  sameObject(plan.implementationStatus, FROZEN_IMPLEMENTATION_STATUS, 'implementationStatus');
+  const state = plan.implementationStatus.currentCloudBaseState;
+  for (const name of COLLECTIONS) {
+    equal(state[name], 0, `implementationStatus.currentCloudBaseState.${name}`);
+    equal(state[name], collection(plan, name).expectedDocumentCount, `implementationStatus count for ${name}`);
+  }
+  const indexCount = plan.collections.reduce((total, item) => total + item.indexes.length, 0);
+  equal(indexCount, CUSTOM_INDEX_COUNT, 'B-group custom index count');
+  equal(state.customIndexCount, CUSTOM_INDEX_COUNT, 'implementationStatus.currentCloudBaseState.customIndexCount');
+  equal(state.customIndexCount, indexCount, 'implementationStatus index count');
+}
 function validatePlan(plan = readPlan()) {
   equal(plan.envId, ENV_ID, 'envId');
   equal(plan.group, 'B', 'group');
@@ -173,7 +199,7 @@ function validatePlan(plan = readPlan()) {
   assert(plan.collections.length === COLLECTIONS.length, 'B group must contain exactly four collections');
   equal(plan.idempotencyPolicy.existingExactMatch, 'verify_and_skip', 'existingExactMatch');
   equal(plan.idempotencyPolicy.existingMismatch, 'stop_and_report', 'existingMismatch');
-  equal(plan.idempotencyPolicy.missing, 'create_from_plan', 'missing');
+  equal(plan.idempotencyPolicy.missing, 'stop_and_report', 'missing');
   for (const name of plan.idempotencyPolicy.forbiddenProbeCollectionNames) assert(['__probe__', 'probe', 'test', 'temp'].includes(name), 'Only forbidden probe names may be listed');
   assert(Array.isArray(plan.initializationPolicy.documents) && plan.initializationPolicy.documents.length === 0, 'B group must not initialize business records');
 
@@ -191,6 +217,7 @@ function validatePlan(plan = readPlan()) {
     validateStateMachine(item);
     if (name !== 'security_dispositions') assert(!Object.prototype.hasOwnProperty.call(item, 'appendOnly'), `${name} must not be appendOnly history`);
   }
+  validateImplementationStatus(plan);
   const report = collection(plan, 'fraud_reports');
   assert(report.uniqueRules.length === 1, 'fraud_reports must have exactly one UNIQUE rule');
   const unique = report.uniqueRules[0];
@@ -208,4 +235,4 @@ if (require.main === module) {
   catch (error) { console.error(`B-group plan validation failed: ${error.message}`); process.exit(1); }
 }
 
-module.exports = { validatePlan, FROZEN_FIELDS, FROZEN_FIELD_CONTRACTS, FROZEN_INDEXES, FROZEN_STATE_MACHINES };
+module.exports = { validatePlan, FROZEN_FIELDS, FROZEN_FIELD_CONTRACTS, FROZEN_INDEXES, FROZEN_STATE_MACHINES, FROZEN_IMPLEMENTATION_STATUS };
