@@ -536,3 +536,50 @@ test('54. runtime logger payload 不含 OPENID 或完整 event', async () => {
     for (const secret of ['trusted-openid', 'openid', 'wxOpenId', 'identityNo', '张三']) assert.equal(runtimeJson.includes(secret), false);
   }
 });
+
+test('55. 平台注入 userInfo 时仍可完成正常绑定', async () => {
+  const { handler, state } = makeBinding([baseUser()], trustedContext);
+  const response = await handler({ role: 'student', identityNo: '20230001', name: '张三', userInfo: { nickName: '平台资料' } });
+  assert.equal(response.code, 'BOUND');
+  assert.equal(state.users[0].wxOpenId, trustedContext.OPENID);
+  assert.equal(state.audits.length, 1);
+});
+
+test('56. userInfo 内伪造 openId 不能影响 trusted getWXContext OPENID', async () => {
+  const { handler, state } = makeBinding([baseUser()], trustedContext);
+  const response = await handler({ role: 'student', identityNo: '20230001', name: '张三', userInfo: { openId: 'spoofed-openid', appId: 'wrong-appid' } });
+  assert.equal(response.code, 'BOUND');
+  assert.equal(state.users[0].wxOpenId, trustedContext.OPENID);
+  assert.notEqual(state.users[0].wxOpenId, 'spoofed-openid');
+});
+
+test('57. event 额外 openid 仍返回 INVALID_INPUT', async () => {
+  const { handler } = makeBinding([baseUser()], trustedContext);
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三', openid: 'spoofed' })).code, 'INVALID_INPUT');
+});
+
+test('58. event 额外 userId 仍返回 INVALID_INPUT', async () => {
+  const { handler } = makeBinding([baseUser()], trustedContext);
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三', userId: 'usr_attacker' })).code, 'INVALID_INPUT');
+});
+
+test('59. event 额外 actorId 仍返回 INVALID_INPUT', async () => {
+  const { handler } = makeBinding([baseUser()], trustedContext);
+  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三', actorId: 'usr_attacker' })).code, 'INVALID_INPUT');
+});
+
+test('60. userInfo 及其 openId 不进入 audit 或 runtime logger', async () => {
+  const userInfo = { openId: 'spoofed-openid', nickName: '平台资料' };
+  const successRun = makeBinding([baseUser()], trustedContext);
+  await successRun.handler({ role: 'student', identityNo: '20230001', name: '张三', userInfo });
+  const auditJson = JSON.stringify(successRun.state.audits[0]);
+  assert.equal(auditJson.includes('userInfo'), false);
+  assert.equal(auditJson.includes('spoofed-openid'), false);
+
+  const existingUser = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const failureRun = makeBinding([existingUser], trustedContext, { auditFailure: true });
+  await failureRun.handler({ role: 'student', identityNo: '20230001', name: '张三', userInfo });
+  const runtimeJson = JSON.stringify(failureRun.logs[0]);
+  assert.equal(runtimeJson.includes('userInfo'), false);
+  assert.equal(runtimeJson.includes('spoofed-openid'), false);
+});
