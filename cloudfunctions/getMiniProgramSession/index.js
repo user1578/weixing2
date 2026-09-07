@@ -1,6 +1,7 @@
 'use strict';
 
 const EXPECTED_APP_ID = 'wxe262970211858262';
+const TARGET_ENV_ID = 'aa-d4gvb4o3t50fc94f8';
 const MINI_PROGRAM_ROLES = new Set(['student', 'counselor']);
 
 function success(code, payload = {}) {
@@ -28,6 +29,14 @@ async function findUserByWxIdentityKey(db, wxIdentityKey) {
 
 function getAppId(wxContext) {
   return wxContext && (wxContext.APPID || wxContext.appId);
+}
+
+function isBoundToTrustedOpenId(user, trustedOpenId) {
+  return user.bindStatus === 'bound' &&
+    typeof user.wxOpenId === 'string' &&
+    user.wxOpenId.length > 0 &&
+    user.wxOpenId === trustedOpenId &&
+    user.wxIdentityKey === `openid:${trustedOpenId}`;
 }
 
 function createHandler({ db, getWXContext, logger = console, createRequestId = () => 'session' }) {
@@ -63,11 +72,7 @@ function createHandler({ db, getWXContext, logger = console, createRequestId = (
       if (user.status !== 'active') {
         return failure('ACCOUNT_DISABLED', '账号当前不可用');
       }
-      if (
-        user.bindStatus !== 'bound' ||
-        !user.wxOpenId ||
-        user.wxIdentityKey !== expectedWxIdentityKey
-      ) {
+      if (!isBoundToTrustedOpenId(user, wxContext.OPENID)) {
         logger.error({ requestId, code: 'INTERNAL_ERROR', resourceId: user._id });
         return failure('INTERNAL_ERROR', '账号绑定状态异常，请联系管理员');
       }
@@ -83,10 +88,11 @@ function createHandler({ db, getWXContext, logger = console, createRequestId = (
   };
 }
 
-function createDefaultHandler() {
+function createDefaultHandler(cloud = require('wx-server-sdk')) {
   // Delayed loading keeps node:test independent from the CloudBase runtime package.
-  const cloud = require('wx-server-sdk');
-  cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
+  // DEPLOYMENT BLOCKED UNTIL audit_logs EXISTS: login failures and denials require audit policy.
+  // Before a trusted actor can be resolved, only the desensitized runtime log is permitted.
+  cloud.init({ env: TARGET_ENV_ID });
   const db = cloud.database();
   return createHandler({
     db,
@@ -97,4 +103,10 @@ function createDefaultHandler() {
 }
 
 exports.main = async () => createDefaultHandler()();
-exports.__testables = { createHandler, toProfile, EXPECTED_APP_ID };
+exports.__testables = {
+  createHandler,
+  createDefaultHandler,
+  toProfile,
+  EXPECTED_APP_ID,
+  TARGET_ENV_ID,
+};
