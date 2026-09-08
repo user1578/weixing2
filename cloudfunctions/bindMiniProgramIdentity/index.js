@@ -6,7 +6,10 @@ const EXPECTED_APP_ID = 'wxe262970211858262';
 const TARGET_ENV_ID = 'aa-d4gvb4o3t50fc94f8';
 const ALLOWED_ROLES = new Set(['student', 'counselor']);
 const ALLOWED_INPUT_KEYS = new Set(['role', 'identityNo', 'name']);
-const IGNORED_PLATFORM_EVENT_KEYS = new Set(['userInfo']);
+const IGNORED_PLATFORM_EVENT_KEYS = new Set([
+  'userInfo',
+  'tcbContext',
+]);
 const ACCEPTED_EVENT_KEYS = new Set([...ALLOWED_INPUT_KEYS, ...IGNORED_PLATFORM_EVENT_KEYS]);
 
 function success(code, payload = {}) {

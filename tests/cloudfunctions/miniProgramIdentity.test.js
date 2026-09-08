@@ -624,3 +624,93 @@ test('64. 未知顶层字段诊断日志不包含任何输入或身份上下文�
     assert.equal(runtimeJson.includes(secret), false);
   }
 });
+
+test('65. 平台注入 tcbContext 时仍可完成正常绑定', async () => {
+  const { handler, state } = makeBinding([baseUser()], trustedContext);
+  const response = await handler({
+    role: 'student',
+    identityNo: '20230001',
+    name: '张三',
+    tcbContext: { requestId: 'platform-request-id' },
+  });
+  assert.equal(response.code, 'BOUND');
+  assert.equal(state.users[0].wxOpenId, trustedContext.OPENID);
+  assert.equal(state.audits.length, 1);
+});
+
+test('66. tcbContext 中伪造身份字段不能影响 trusted getWXContext OPENID', async () => {
+  const { handler, state } = makeBinding([baseUser()], trustedContext);
+  const response = await handler({
+    role: 'student',
+    identityNo: '20230001',
+    name: '张三',
+    tcbContext: { openId: 'spoofed-openid', OPENID: 'spoofed-openid-uppercase', appId: 'wrong-appid' },
+  });
+  assert.equal(response.code, 'BOUND');
+  assert.equal(state.users[0].wxOpenId, trustedContext.OPENID);
+  assert.equal(state.users[0].wxIdentityKey, `openid:${trustedContext.OPENID}`);
+  assert.notEqual(state.users[0].wxOpenId, 'spoofed-openid');
+  assert.notEqual(state.users[0].wxOpenId, 'spoofed-openid-uppercase');
+});
+
+test('67. userInfo 与 tcbContext 同时存在时不触发未知字段诊断', async () => {
+  const { handler, logs } = makeBinding([baseUser()], trustedContext);
+  const response = await handler({
+    role: 'student',
+    identityNo: '20230001',
+    name: '张三',
+    userInfo: { nickName: '平台资料' },
+    tcbContext: { requestId: 'platform-request-id' },
+  });
+  assert.equal(response.code, 'BOUND');
+  assert.deepEqual(logs, []);
+});
+
+test('68. tcbContext 内容不进入 audit 或 runtime logger', async () => {
+  const tcbContext = {
+    openId: 'spoofed-openid',
+    OPENID: 'spoofed-openid-uppercase',
+    appId: 'wrong-appid',
+    privateField: '不应记录的 tcbContext 内容',
+  };
+  const successRun = makeBinding([baseUser()], trustedContext);
+  await successRun.handler({ role: 'student', identityNo: '20230001', name: '张三', tcbContext });
+  const auditJson = JSON.stringify(successRun.state.audits[0]);
+  for (const secret of ['tcbContext', 'spoofed-openid', 'spoofed-openid-uppercase', 'wrong-appid', '不应记录的 tcbContext 内容']) {
+    assert.equal(auditJson.includes(secret), false);
+  }
+
+  const existingUser = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const failureRun = makeBinding([existingUser], trustedContext, { auditFailure: true });
+  await failureRun.handler({ role: 'student', identityNo: '20230001', name: '张三', tcbContext });
+  const runtimeJson = JSON.stringify(failureRun.logs[0]);
+  for (const secret of ['tcbContext', 'spoofed-openid', 'spoofed-openid-uppercase', 'wrong-appid', '不应记录的 tcbContext 内容']) {
+    assert.equal(runtimeJson.includes(secret), false);
+  }
+});
+
+test('69. 其他未知或伪造顶层字段仍被拒绝并记录脱敏诊断', async () => {
+  const { handler, logs, state } = makeBinding([baseUser()], trustedContext);
+  const response = await handler({
+    role: 'student',
+    identityNo: '20230001',
+    name: '张三',
+    tcbContext: { requestId: 'platform-request-id' },
+    openid: 'spoofed-openid',
+    OPENID: 'spoofed-openid-uppercase',
+    userId: 'usr_attacker',
+    actorId: 'usr_attacker',
+    collegeId: 'college_attacker',
+    wxIdentityKey: 'openid:spoofed-openid',
+    riskLevel: 'low',
+  });
+  assert.equal(response.code, 'INVALID_INPUT');
+  assert.deepEqual(logs, [{
+    requestId: 'req-bind',
+    code: 'INVALID_INPUT',
+    stage: 'validateInputUnknownKeys',
+    unknownEventKeys: ['OPENID', 'actorId', 'collegeId', 'openid', 'riskLevel', 'userId', 'wxIdentityKey'],
+  }]);
+  assert.equal(state.transactionCalls, 0);
+  assert.equal(state.audits.length, 0);
+});
