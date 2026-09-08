@@ -16,6 +16,10 @@
       <view>name：{{profile.name}}</view>
       <view>collegeId：{{profile.collegeId}}</view>
       <view>focusFlag：{{profile.focusFlag}}</view>
+      <view class="student_alert_entry" wx:if="{{profile.role === 'student'}}">
+        <view class="student_alert_hint">学生服务</view>
+        <button class="primary_button" bindtap="goToStudentAlerts">查看我的预警</button>
+      </view>
     </view>
     <view class="bind_form" wx:if="{{sessionCode === 'UNBOUND'}}">
       <view class="form_title">绑定演示身份</view>

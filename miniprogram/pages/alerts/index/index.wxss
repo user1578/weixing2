@@ -1,0 +1,133 @@
+page {
+  min-height: 100%;
+  background: #f6f7f9;
+}
+
+.page {
+  padding: 36rpx 30rpx 56rpx;
+}
+
+.page_header {
+  margin-bottom: 28rpx;
+}
+
+.page_title {
+  color: #1f2937;
+  font-size: 42rpx;
+  font-weight: 600;
+}
+
+.page_subtitle {
+  margin-top: 10rpx;
+  color: #7a8494;
+  font-size: 26rpx;
+}
+
+.state_card,
+.alert_card {
+  box-sizing: border-box;
+  border-radius: 16rpx;
+  background: #ffffff;
+  box-shadow: 0 4rpx 16rpx rgba(35, 46, 66, 0.06);
+}
+
+.state_card {
+  padding: 48rpx 32rpx;
+  color: #6b7280;
+  text-align: center;
+  font-size: 28rpx;
+}
+
+.error_state {
+  color: #c2413c;
+}
+
+.retry_button {
+  width: 230rpx;
+  margin-top: 28rpx;
+  border-radius: 40rpx;
+  background: #1677ff;
+  color: #ffffff;
+  font-size: 28rpx;
+}
+
+.alert_card {
+  margin-bottom: 20rpx;
+  padding: 26rpx 28rpx;
+}
+
+.alert_card_top,
+.alert_card_bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fraud_type {
+  min-width: 0;
+  color: #1f2937;
+  font-size: 31rpx;
+  font-weight: 600;
+}
+
+.risk_tag,
+.status_tag {
+  flex: none;
+  margin-left: 20rpx;
+  padding: 5rpx 14rpx;
+  border-radius: 20rpx;
+  font-size: 23rpx;
+  line-height: 1.35;
+}
+
+.risk-low {
+  background: #e9f8ef;
+  color: #23824b;
+}
+
+.risk-medium {
+  background: #fff4dc;
+  color: #af6900;
+}
+
+.risk-high {
+  background: #ffebe9;
+  color: #ca3f34;
+}
+
+.risk-unknown {
+  background: #eef1f5;
+  color: #687385;
+}
+
+.summary {
+  display: -webkit-box;
+  margin: 22rpx 0;
+  overflow: hidden;
+  color: #5f6877;
+  font-size: 27rpx;
+  line-height: 1.65;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.status_tag {
+  margin-left: 0;
+  background: #edf4ff;
+  color: #3970bd;
+}
+
+.status-closed {
+  background: #eef1f5;
+  color: #687385;
+}
+
+.status-following_up {
+  background: #f4edff;
+  color: #7956ad;
+}
+
+.issued_at {
+  color: #98a1af;
+  font-size: 23rpx;
+}

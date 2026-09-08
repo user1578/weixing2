@@ -113,4 +113,9 @@ Page({
       this.setData({ bindLoading: false });
     }
   },
+
+  goToStudentAlerts() {
+    if (this.data.sessionCode !== "BOUND" || !this.data.profile || this.data.profile.role !== "student") return;
+    wx.navigateTo({ url: "/pages/alerts/index/index" });
+  },
 });

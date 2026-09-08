@@ -1,0 +1,29 @@
+<view class="page">
+  <view class="state_card" wx:if="{{loading}}">正在加载预警详情...</view>
+
+  <view class="state_card error_state" wx:elif="{{errorMessage}}">
+    <view>{{errorMessage}}</view>
+    <button class="retry_button" bindtap="loadAlert">重新加载</button>
+  </view>
+
+  <view class="detail_card" wx:elif="{{alert}}">
+    <view class="detail_header">
+      <view class="fraud_type">{{alert.fraudTypeText}}</view>
+      <view class="risk_tag {{alert.riskClass}}">{{alert.riskLevelText}}</view>
+    </view>
+
+    <view class="meta_row">
+      <view class="meta_label">预警状态</view>
+      <view class="status_tag {{alert.statusClass}}">{{alert.statusText}}</view>
+    </view>
+    <view class="meta_row">
+      <view class="meta_label">下发时间</view>
+      <view class="meta_value">{{alert.issuedAtText}}</view>
+    </view>
+
+    <view class="divider"></view>
+
+    <view class="content_label">安全提醒</view>
+    <view class="content">{{alert.content}}</view>
+  </view>
+</view>

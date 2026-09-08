@@ -1,0 +1,29 @@
+<view class="page">
+  <view class="page_header">
+    <view class="page_title">我的预警</view>
+    <view class="page_subtitle">请及时查看并留意安全提醒</view>
+  </view>
+
+  <view class="state_card" wx:if="{{loading}}">正在加载预警...</view>
+
+  <view class="state_card error_state" wx:elif="{{errorMessage}}">
+    <view>{{errorMessage}}</view>
+    <button class="retry_button" bindtap="loadAlerts">重新加载</button>
+  </view>
+
+  <view class="state_card" wx:elif="{{loaded && alerts.length === 0}}">暂时没有已下发的预警</view>
+
+  <view class="alert_list" wx:elif="{{alerts.length}}">
+    <view class="alert_card" wx:for="{{alerts}}" wx:key="alertId" bindtap="openAlert" data-alert-id="{{item.alertId}}">
+      <view class="alert_card_top">
+        <view class="fraud_type">{{item.fraudTypeText}}</view>
+        <view class="risk_tag {{item.riskClass}}">{{item.riskLevelText}}</view>
+      </view>
+      <view class="summary">{{item.contentSummary}}</view>
+      <view class="alert_card_bottom">
+        <view class="status_tag {{item.statusClass}}">{{item.statusText}}</view>
+        <view class="issued_at">{{item.issuedAtText}}</view>
+      </view>
+    </view>
+  </view>
+</view>
