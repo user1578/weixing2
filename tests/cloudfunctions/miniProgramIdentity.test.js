@@ -583,3 +583,44 @@ test('60. userInfo 及其 openId 不进入 audit 或 runtime logger', async () =
   assert.equal(runtimeJson.includes('userInfo'), false);
   assert.equal(runtimeJson.includes('spoofed-openid'), false);
 });
+
+test('61. 未知顶层字段返回 INVALID_INPUT 并记录最小脱敏诊断', async () => {
+  const { handler, logs } = makeBinding([baseUser()], trustedContext);
+  const response = await handler({ role: 'student', identityNo: '20230001', name: '张三', _platformField: '不应记录的值' });
+  assert.equal(response.code, 'INVALID_INPUT');
+  assert.deepEqual(logs, [{
+    requestId: 'req-bind',
+    code: 'INVALID_INPUT',
+    stage: 'validateInputUnknownKeys',
+    unknownEventKeys: ['_platformField'],
+  }]);
+  assert.deepEqual(Object.keys(logs[0]).sort(), ['code', 'requestId', 'stage', 'unknownEventKeys']);
+});
+
+test('62. 未知顶层字段诊断只包含排序后的字段名', async () => {
+  const { handler, logs } = makeBinding([baseUser()], trustedContext);
+  await handler({ role: 'student', identityNo: '20230001', name: '张三', zPlatformField: 'z', _platformField: 'a' });
+  assert.deepEqual(logs[0].unknownEventKeys, ['_platformField', 'zPlatformField']);
+});
+
+test('63. 合法 userInfo 不触发未知顶层字段诊断', async () => {
+  const { handler, logs } = makeBinding([baseUser()], trustedContext);
+  const response = await handler({ role: 'student', identityNo: '20230001', name: '张三', userInfo: { nickName: '平台资料' } });
+  assert.equal(response.code, 'BOUND');
+  assert.deepEqual(logs, []);
+});
+
+test('64. 未知顶层字段诊断日志不包含任何输入或身份上下文值', async () => {
+  const { handler, logs } = makeBinding([baseUser()], trustedContext);
+  await handler({
+    role: 'student',
+    identityNo: '20230001',
+    name: '张三',
+    userInfo: { openId: 'spoofed-openid', nickName: '不应记录的 userInfo 内容' },
+    _platformField: '不应记录的字段值',
+  });
+  const runtimeJson = JSON.stringify(logs[0]);
+  for (const secret of ['张三', '20230001', 'trusted-openid', 'spoofed-openid', '不应记录的 userInfo 内容', '不应记录的字段值']) {
+    assert.equal(runtimeJson.includes(secret), false);
+  }
+});

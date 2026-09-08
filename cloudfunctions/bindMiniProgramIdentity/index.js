@@ -56,6 +56,16 @@ function validateInput(event) {
   return { role: event.role, identityNo, name };
 }
 
+function getUnknownEventKeys(event) {
+  if (!event || typeof event !== 'object' || Array.isArray(event)) {
+    return [];
+  }
+
+  return Object.keys(event)
+    .filter((key) => !ACCEPTED_EVENT_KEYS.has(key))
+    .sort();
+}
+
 function getAppId(wxContext) {
   return wxContext && (wxContext.APPID || wxContext.appId);
 }
@@ -209,6 +219,17 @@ function createHandler({
         return failure('BINDING_DISABLED', '当前环境未开启演示身份绑定');
       }
 
+      const unknownEventKeys = getUnknownEventKeys(event);
+      if (unknownEventKeys.length > 0) {
+        logger.error({
+          requestId,
+          code: 'INVALID_INPUT',
+          stage: 'validateInputUnknownKeys',
+          unknownEventKeys,
+        });
+        return failure('INVALID_INPUT', '请输入有效的角色、学号或工号及姓名');
+      }
+
       const input = validateInput(event);
       if (!input) {
         return failure('INVALID_INPUT', '请输入有效的角色、学号或工号及姓名');
@@ -330,6 +351,7 @@ exports.__testables = {
   createAuditLog,
   createFailureAuditLog,
   validateInput,
+  getUnknownEventKeys,
   toProfile,
   EXPECTED_APP_ID,
   TARGET_ENV_ID,
