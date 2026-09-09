@@ -320,7 +320,11 @@ test('18. token claims 严格最小且有效期为两小时', async () => {
 
 test('19. token 签名篡改返回 TOKEN_INVALID', async () => {
   const { fixture, token } = await authenticatedFixture();
-  const tampered = `${token.slice(0, -1)}${token.endsWith('A') ? 'B' : 'A'}`;
+  const [version, payload, signature] = token.split('.');
+  const signatureBytes = Buffer.from(signature, 'base64url');
+  signatureBytes[0] ^= 0x01;
+  const tamperedSignature = signatureBytes.toString('base64url');
+  const tampered = `${version}.${payload}.${tamperedSignature}`;
   const response = await request(fixture.handler, {
     method: 'GET', path: '/session', headers: { Authorization: `Bearer ${tampered}` },
   });
