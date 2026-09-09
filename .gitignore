@@ -34,6 +34,8 @@ scripts/cloudbase/**/.runtime/
 .env
 .env.local
 .env.*.local
+web-admin/.env.*
+!web-admin/.env.example
 *.pem
 *.key
 *.p12
