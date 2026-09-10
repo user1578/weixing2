@@ -9,6 +9,20 @@ const LOCAL_DEVELOPMENT_ORIGIN = 'http://localhost:5173';
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
 const LOGIN_INPUT_KEYS = new Set(['loginName', 'password']);
 const TOKEN_CLAIM_KEYS = ['exp', 'iat', 'jti', 'role', 'sub'];
+const ALERT_CREATE_INPUT_KEYS = new Set(['studentNo', 'fraudType', 'content', 'sourceReference']);
+const ALERT_CREATE_REQUIRED_INPUT_KEYS = new Set(['studentNo', 'fraudType', 'content']);
+const ALERT_DISPATCH_INPUT_KEYS = new Set(['version']);
+const ALLOWED_FRAUD_TYPES = new Set([
+  'part_time_scam',
+  'impersonate_public',
+  'fake_loan',
+  'fake_refund',
+  'other',
+]);
+const ACTIVE_ALERT_STATUSES = ['sent', 'viewed', 'following_up'];
+const MAX_STUDENT_NO_LENGTH = 64;
+const MAX_ALERT_CONTENT_LENGTH = 1000;
+const MAX_SOURCE_REFERENCE_LENGTH = 128;
 
 const ERROR_MESSAGES = {
   INVALID_INPUT: '请求内容无效',
@@ -18,6 +32,7 @@ const ERROR_MESSAGES = {
   TOKEN_EXPIRED: '会话已过期',
   ACCOUNT_DISABLED: '账号当前不可用',
   FORBIDDEN: '当前账号无权访问',
+  CONFLICT: '资源状态已变化，请刷新后重试',
   INTERNAL_ERROR: '服务暂时不可用，请稍后重试',
   NOT_FOUND: '接口不存在',
 };
@@ -64,6 +79,125 @@ function parseLoginBody(body) {
     return null;
   }
   return { loginName, password: parsed.password };
+}
+
+function parseJsonObjectBody(body) {
+  let parsed = body;
+  if (typeof body === 'string') {
+    if (!body.trim()) {
+      return null;
+    }
+    try {
+      parsed = JSON.parse(body);
+    } catch (error) {
+      return null;
+    }
+  }
+  return isPlainObject(parsed) ? parsed : null;
+}
+
+function hasOnlyAllowedKeys(value, allowedKeys, requiredKeys = new Set()) {
+  const keys = Object.keys(value);
+  return keys.every((key) => allowedKeys.has(key)) &&
+    [...requiredKeys].every((key) => Object.hasOwn(value, key));
+}
+
+function normalizeRequiredString(value, maximumLength) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized && normalized.length <= maximumLength ? normalized : null;
+}
+
+function parseAlertCreateBody(body) {
+  const parsed = parseJsonObjectBody(body);
+  if (!parsed || !hasOnlyAllowedKeys(parsed, ALERT_CREATE_INPUT_KEYS, ALERT_CREATE_REQUIRED_INPUT_KEYS)) {
+    return null;
+  }
+
+  const studentNo = normalizeRequiredString(parsed.studentNo, MAX_STUDENT_NO_LENGTH);
+  const content = normalizeRequiredString(parsed.content, MAX_ALERT_CONTENT_LENGTH);
+  if (!studentNo || !content || typeof parsed.fraudType !== 'string' || !ALLOWED_FRAUD_TYPES.has(parsed.fraudType)) {
+    return null;
+  }
+
+  let sourceReference;
+  if (Object.hasOwn(parsed, 'sourceReference') && parsed.sourceReference !== null) {
+    if (typeof parsed.sourceReference !== 'string') {
+      return null;
+    }
+    sourceReference = parsed.sourceReference.trim();
+    if (sourceReference.length > MAX_SOURCE_REFERENCE_LENGTH) {
+      return null;
+    }
+    if (!sourceReference) {
+      sourceReference = undefined;
+    }
+  }
+
+  return { studentNo, fraudType: parsed.fraudType, content, sourceReference };
+}
+
+function parseAlertDispatchBody(body) {
+  const parsed = parseJsonObjectBody(body);
+  if (!parsed || !hasOnlyAllowedKeys(parsed, ALERT_DISPATCH_INPUT_KEYS, ALERT_DISPATCH_INPUT_KEYS) ||
+    !Number.isSafeInteger(parsed.version) || parsed.version <= 0) {
+    return null;
+  }
+  return { version: parsed.version };
+}
+
+function businessError(code) {
+  const error = new Error(code);
+  error.isBusinessError = true;
+  error.businessCode = code;
+  return error;
+}
+
+function isTransactionConflict(error) {
+  const value = `${error && error.code ? error.code : ''} ${error && error.errCode ? error.errCode : ''} ${error && error.message ? error.message : ''}`.toLowerCase();
+  return value.includes('transaction_conflict') ||
+    value.includes('transaction conflict') ||
+    value.includes('write conflict') ||
+    value.includes('database_transaction_conflict');
+}
+
+function updatedCount(result) {
+  if (result && typeof result.updated === 'number') {
+    return result.updated;
+  }
+  if (result && result.stats && typeof result.stats.updated === 'number') {
+    return result.stats.updated;
+  }
+  return 0;
+}
+
+function ensureDatabaseResult(result) {
+  if (!result || result.code) {
+    throw new Error('Database operation failed');
+  }
+  return result;
+}
+
+function ensureSuccessfulInsert(result) {
+  ensureDatabaseResult(result);
+  if ((typeof result.inserted === 'number' && result.inserted !== 1) ||
+    (typeof result.ok === 'number' && result.ok !== 1)) {
+    throw new Error('Database insert did not affect one document');
+  }
+  return result;
+}
+
+function firstRecord(result) {
+  ensureDatabaseResult(result);
+  if (!Object.hasOwn(result, 'data')) {
+    return null;
+  }
+  if (Array.isArray(result.data)) {
+    return result.data[0] || null;
+  }
+  return result.data || null;
 }
 
 function safeLog(logger, entry) {
@@ -295,45 +429,353 @@ function createAuthService({
     });
   }
 
-  async function session(authorization) {
+  async function authenticateSecuritySession(authorization) {
     const requestId = createRequestId();
     if (typeof authorization !== 'string' || !authorization) {
-      return failure('TOKEN_MISSING');
+      return { ok: false, result: failure('TOKEN_MISSING') };
     }
     const match = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(authorization);
     if (!match) {
-      return failure('TOKEN_INVALID');
+      return { ok: false, result: failure('TOKEN_INVALID') };
     }
     if (!dependenciesReady) {
-      return internalFailure(requestId, 'securitySessionConfiguration');
+      return { ok: false, result: internalFailure(requestId, 'securitySessionConfiguration') };
     }
 
     const verified = verifySessionToken(match[1], sessionSecret, nowSeconds());
     if (!verified.ok) {
-      return failure(verified.code);
+      return { ok: false, result: failure(verified.code) };
     }
     let user;
     try {
       user = await userRepository.findById(verified.claims.sub);
     } catch (error) {
-      return internalFailure(requestId, 'securitySessionLookup', verified.claims.sub);
+      return { ok: false, result: internalFailure(requestId, 'securitySessionLookup', verified.claims.sub) };
     }
     if (!user) {
-      return failure('TOKEN_INVALID');
+      return { ok: false, result: failure('TOKEN_INVALID') };
     }
     if (user.role !== 'security') {
-      return failure('FORBIDDEN');
+      return { ok: false, result: failure('FORBIDDEN') };
     }
     if (user.status !== 'active') {
-      return failure('ACCOUNT_DISABLED');
+      return { ok: false, result: failure('ACCOUNT_DISABLED') };
     }
     if (!hasActiveSecuritySessionAccess(user)) {
-      return failure('FORBIDDEN');
+      return { ok: false, result: failure('FORBIDDEN') };
     }
-    return success('SESSION_VALID', { profile: toProfile(user) });
+    return { ok: true, user, requestId };
   }
 
-  return { login, session };
+  async function session(authorization) {
+    const authenticated = await authenticateSecuritySession(authorization);
+    if (!authenticated.ok) {
+      return authenticated.result;
+    }
+    return success('SESSION_VALID', { profile: toProfile(authenticated.user) });
+  }
+
+  return { login, session, authenticateSecuritySession };
+}
+
+function isActiveStudentTarget(user) {
+  return Boolean(user) &&
+    user.role === 'student' &&
+    user.status === 'active' &&
+    typeof user.collegeId === 'string' &&
+    Boolean(user.collegeId.trim());
+}
+
+function isEnabledDefaultRiskRule(rule) {
+  return Boolean(rule) &&
+    rule._id === 'rule_default' &&
+    rule.status === 'enabled' &&
+    Number.isSafeInteger(rule.repeatAlertWindowDays) && rule.repeatAlertWindowDays > 0 &&
+    Number.isSafeInteger(rule.highAlertRepeatCount) && rule.highAlertRepeatCount > 0 &&
+    Number.isSafeInteger(rule.midAlertRepeatCount) && rule.midAlertRepeatCount > 0 &&
+    Array.isArray(rule.keyFraudTypes);
+}
+
+function calculateManualAlertRisk({ fraudType, focusFlag, activeAlertCount, rule }) {
+  const keyFraudType = rule.keyFraudTypes.includes(fraudType);
+  const isFocused = focusFlag === true;
+  const reachesHighRepeat = activeAlertCount >= rule.highAlertRepeatCount;
+  const reachesMidRepeat = activeAlertCount >= rule.midAlertRepeatCount;
+  const highBecauseFocusAndRepeat = isFocused && reachesMidRepeat;
+  const riskReasons = [];
+
+  if (keyFraudType) {
+    riskReasons.push('key_fraud_type');
+  }
+  if (isFocused) {
+    riskReasons.push('focus_flag');
+  }
+  if (reachesHighRepeat) {
+    riskReasons.push(`repeat_alert_count>=${rule.highAlertRepeatCount}`);
+  } else if (reachesMidRepeat) {
+    riskReasons.push(`repeat_alert_count>=${rule.midAlertRepeatCount}`);
+  }
+
+  if (reachesHighRepeat || highBecauseFocusAndRepeat) {
+    return { riskLevel: 'high', riskReasons };
+  }
+  if (keyFraudType || reachesMidRepeat || isFocused) {
+    return { riskLevel: 'medium', riskReasons };
+  }
+  return { riskLevel: 'low', riskReasons };
+}
+
+async function findTransactionRecordById(transaction, collectionName, id) {
+  return firstRecord(await transaction.collection(collectionName).doc(id).get());
+}
+
+async function findTransactionRecordByQuery(transaction, collectionName, query) {
+  return firstRecord(await transaction.collection(collectionName).where(query).limit(1).get());
+}
+
+function createAlertCreateAudit({ alertId, actorId, riskLevel, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'alert.create',
+    resourceType: 'alert',
+    resourceId: alertId,
+    result: 'success',
+    afterSummary: { status: 'pending_dispatch', riskLevel },
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
+function createAlertDispatchAudit({ alertId, actorId, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'alert.dispatch',
+    resourceType: 'alert',
+    resourceId: alertId,
+    result: 'success',
+    beforeSummary: { status: 'pending_dispatch' },
+    afterSummary: { status: 'sent' },
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
+function createSecurityAlertService({
+  authService,
+  db,
+  serverDate,
+  createAlertId = () => `alert_${crypto.randomUUID().replace(/-/g, '')}`,
+  createAuditId = () => `audit_${crypto.randomUUID().replace(/-/g, '')}`,
+  createRequestId = () => crypto.randomUUID(),
+  now = () => new Date(),
+  logger = console,
+  configured = true,
+} = {}) {
+  const dependenciesReady = configured &&
+    authService && typeof authService.authenticateSecuritySession === 'function' &&
+    db && typeof db.runTransaction === 'function' && typeof db.collection === 'function' &&
+    db.command && typeof db.command.in === 'function' && typeof db.command.gte === 'function' &&
+    typeof serverDate === 'function';
+
+  function internalFailure(requestId, stage, resourceId = null) {
+    safeLog(logger, { requestId, code: 'INTERNAL_ERROR', resourceId, stage });
+    return failure('INTERNAL_ERROR');
+  }
+
+  async function authenticate(authorization, requestId, stage) {
+    try {
+      return await authService.authenticateSecuritySession(authorization);
+    } catch (error) {
+      return { ok: false, result: internalFailure(requestId, stage) };
+    }
+  }
+
+  async function create(authorization, body) {
+    const requestId = createRequestId();
+    const input = parseAlertCreateBody(body);
+    if (!input) {
+      return failure('INVALID_INPUT');
+    }
+    if (!dependenciesReady) {
+      return internalFailure(requestId, 'securityAlertCreateConfiguration');
+    }
+
+    const authenticated = await authenticate(authorization, requestId, 'securityAlertCreateAuthentication');
+    if (!authenticated.ok) {
+      return authenticated.result;
+    }
+
+    let requestNow;
+    try {
+      requestNow = now();
+      if (!(requestNow instanceof Date) || Number.isNaN(requestNow.getTime())) {
+        throw new Error('Invalid server clock');
+      }
+    } catch (error) {
+      return internalFailure(requestId, 'securityAlertCreateClock');
+    }
+
+    const alertId = createAlertId();
+    const auditId = createAuditId();
+    try {
+      const alert = await db.runTransaction(async (transaction) => {
+        const targetStudent = await findTransactionRecordByQuery(transaction, 'users', {
+          identityKey: `student:${input.studentNo}`,
+        });
+        if (!isActiveStudentTarget(targetStudent)) {
+          throw businessError('NOT_FOUND');
+        }
+
+        const rule = await findTransactionRecordById(transaction, 'risk_rules', 'rule_default');
+        if (!isEnabledDefaultRiskRule(rule)) {
+          throw businessError('INTERNAL_ERROR');
+        }
+        const windowStart = new Date(requestNow.getTime() - (rule.repeatAlertWindowDays * 24 * 60 * 60 * 1000));
+        const countResult = ensureDatabaseResult(await transaction.collection('alerts').where({
+          studentId: targetStudent._id,
+          status: db.command.in(ACTIVE_ALERT_STATUSES),
+          issuedAt: db.command.gte(windowStart),
+        }).count());
+        if (!countResult || !Number.isSafeInteger(countResult.total) || countResult.total < 0) {
+          throw businessError('INTERNAL_ERROR');
+        }
+
+        const risk = calculateManualAlertRisk({
+          fraudType: input.fraudType,
+          focusFlag: targetStudent.focusFlag,
+          activeAlertCount: countResult.total + 1,
+          rule,
+        });
+        const createdAlert = {
+          _id: alertId,
+          sourceType: 'manual',
+          studentId: targetStudent._id,
+          collegeId: targetStudent.collegeId,
+          fraudType: input.fraudType,
+          content: input.content,
+          riskLevel: risk.riskLevel,
+          riskReasons: risk.riskReasons,
+          riskRuleId: 'rule_default',
+          status: 'pending_dispatch',
+          version: 1,
+          createdAt: serverDate(),
+          updatedAt: serverDate(),
+        };
+        if (input.sourceReference) {
+          createdAlert.sourceReference = input.sourceReference;
+        }
+
+        ensureSuccessfulInsert(await transaction.collection('alerts').add(createdAlert));
+        ensureSuccessfulInsert(await transaction.collection('audit_logs').add(createAlertCreateAudit({
+          alertId,
+          actorId: authenticated.user._id,
+          riskLevel: risk.riskLevel,
+          requestId,
+          serverDate,
+          createAuditId: () => auditId,
+        })));
+        return {
+          alertId,
+          fraudType: createdAlert.fraudType,
+          riskLevel: createdAlert.riskLevel,
+          riskReasons: createdAlert.riskReasons,
+          status: createdAlert.status,
+          version: createdAlert.version,
+        };
+      });
+      return success('ALERT_CREATED', { alert });
+    } catch (error) {
+      if (error && error.isBusinessError) {
+        return failure(error.businessCode);
+      }
+      if (isTransactionConflict(error)) {
+        return failure('CONFLICT');
+      }
+      return internalFailure(requestId, 'securityAlertCreateTransaction', alertId);
+    }
+  }
+
+  async function dispatch(authorization, alertId, body) {
+    const requestId = createRequestId();
+    const input = parseAlertDispatchBody(body);
+    if (!input) {
+      return failure('INVALID_INPUT');
+    }
+    if (!dependenciesReady) {
+      return internalFailure(requestId, 'securityAlertDispatchConfiguration', alertId || null);
+    }
+
+    const authenticated = await authenticate(authorization, requestId, 'securityAlertDispatchAuthentication');
+    if (!authenticated.ok) {
+      return authenticated.result;
+    }
+
+    const auditId = createAuditId();
+    try {
+      const alert = await db.runTransaction(async (transaction) => {
+        const currentAlert = await findTransactionRecordById(transaction, 'alerts', alertId);
+        if (!currentAlert) {
+          throw businessError('NOT_FOUND');
+        }
+        if (currentAlert.status !== 'pending_dispatch' || currentAlert.version !== input.version) {
+          throw businessError('CONFLICT');
+        }
+        if (typeof currentAlert.studentId !== 'string' || !currentAlert.studentId) {
+          throw businessError('CONFLICT');
+        }
+
+        const targetStudent = await findTransactionRecordById(transaction, 'users', currentAlert.studentId);
+        if (!isActiveStudentTarget(targetStudent) || targetStudent.collegeId !== currentAlert.collegeId) {
+          throw businessError('CONFLICT');
+        }
+
+        const updateResult = ensureDatabaseResult(await transaction.collection('alerts').where({
+          _id: currentAlert._id,
+          status: 'pending_dispatch',
+          version: input.version,
+        }).update({
+          status: 'sent',
+          issuedBy: authenticated.user._id,
+          issuedAt: serverDate(),
+          updatedAt: serverDate(),
+          version: input.version + 1,
+        }));
+        if (updatedCount(updateResult) !== 1) {
+          throw businessError('CONFLICT');
+        }
+
+        ensureSuccessfulInsert(await transaction.collection('audit_logs').add(createAlertDispatchAudit({
+          alertId: currentAlert._id,
+          actorId: authenticated.user._id,
+          requestId,
+          serverDate,
+          createAuditId: () => auditId,
+        })));
+        return {
+          alertId: currentAlert._id,
+          status: 'sent',
+          version: input.version + 1,
+        };
+      });
+      return success('ALERT_DISPATCHED', { alert });
+    } catch (error) {
+      if (error && error.isBusinessError) {
+        return failure(error.businessCode);
+      }
+      if (isTransactionConflict(error)) {
+        return failure('CONFLICT');
+      }
+      return internalFailure(requestId, 'securityAlertDispatchTransaction', alertId || null);
+    }
+  }
+
+  return { create, dispatch };
 }
 
 function readHeader(headers, name) {
@@ -404,6 +846,9 @@ function httpStatusFor(result) {
   if (result.code === 'NOT_FOUND') {
     return 404;
   }
+  if (result.code === 'CONFLICT') {
+    return 409;
+  }
   return 500;
 }
 
@@ -415,7 +860,12 @@ function httpResponse(result, headers) {
   };
 }
 
-function createHttpHandler({ authService, allowedOrigins, logger = console }) {
+function getAlertDispatchId(path) {
+  const match = /^\/alerts\/([^/]+)\/dispatch$/.exec(path);
+  return match ? match[1] : null;
+}
+
+function createHttpHandler({ authService, alertService = null, allowedOrigins, logger = console }) {
   if (!authService || typeof authService.login !== 'function' || typeof authService.session !== 'function') {
     throw new Error('securityAuthHttp requires an authentication service');
   }
@@ -429,7 +879,9 @@ function createHttpHandler({ authService, allowedOrigins, logger = console }) {
         ? 'POST, OPTIONS'
         : path === '/session'
           ? 'GET, OPTIONS'
-          : null;
+          : (path === '/alerts' || getAlertDispatchId(path))
+            ? 'POST, OPTIONS'
+            : null;
       if (!allowedMethods) {
         return httpResponse(failure('NOT_FOUND'), buildResponseHeaders(origin, originWhitelist));
       }
@@ -446,6 +898,26 @@ function createHttpHandler({ authService, allowedOrigins, logger = console }) {
       }
       if (method === 'GET' && path === '/session') {
         return httpResponse(await authService.session(readHeader(event && event.headers, 'authorization')), buildResponseHeaders(origin, originWhitelist));
+      }
+      if (method === 'POST' && path === '/alerts') {
+        if (!alertService || typeof alertService.create !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await alertService.create(
+          readHeader(event && event.headers, 'authorization'),
+          event && event.body,
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      const alertId = getAlertDispatchId(path);
+      if (method === 'POST' && alertId) {
+        if (!alertService || typeof alertService.dispatch !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await alertService.dispatch(
+          readHeader(event && event.headers, 'authorization'),
+          alertId,
+          event && event.body,
+        ), buildResponseHeaders(origin, originWhitelist));
       }
       return httpResponse(failure('NOT_FOUND'), buildResponseHeaders(origin, originWhitelist));
     } catch (error) {
@@ -494,6 +966,7 @@ function createDefaultDependencies({
   const repositories = createCloudbaseRepositories(db);
   return {
     ...repositories,
+    db,
     bcrypt,
     sessionSecret,
     serverDate: () => db.serverDate(),
@@ -508,7 +981,14 @@ function createDefaultHandler(options = {}) {
   try {
     const dependencies = createDefaultDependencies({ ...options, environment, logger });
     const authService = createAuthService(dependencies);
-    return createHttpHandler({ authService, allowedOrigins: environment.SECURITY_WEB_ALLOWED_ORIGINS, logger });
+    const alertService = createSecurityAlertService({
+      authService,
+      db: dependencies.db,
+      serverDate: dependencies.serverDate,
+      logger,
+      configured: dependencies.configured,
+    });
+    return createHttpHandler({ authService, alertService, allowedOrigins: environment.SECURITY_WEB_ALLOWED_ORIGINS, logger });
   } catch (error) {
     const unavailableService = {
       login: async () => failure('INTERNAL_ERROR'),
@@ -578,10 +1058,15 @@ exports.__testables = {
   createDefaultDependencies,
   createDefaultHandler,
   createHttpHandler,
+  createSecurityAlertService,
+  calculateManualAlertRisk,
   createLoginAudit,
+  getAlertDispatchId,
   createNodeServer,
   mintSessionToken,
   normalizeLoginName,
+  parseAlertCreateBody,
+  parseAlertDispatchBody,
   parseAllowedOrigins,
   parseLoginBody,
   verifySessionToken,
