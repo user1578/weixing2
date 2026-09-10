@@ -490,10 +490,17 @@ function isEnabledDefaultRiskRule(rule) {
   return Boolean(rule) &&
     rule._id === 'rule_default' &&
     rule.status === 'enabled' &&
+    Number.isSafeInteger(rule.version) && rule.version > 0 &&
     Number.isSafeInteger(rule.repeatAlertWindowDays) && rule.repeatAlertWindowDays > 0 &&
     Number.isSafeInteger(rule.highAlertRepeatCount) && rule.highAlertRepeatCount > 0 &&
     Number.isSafeInteger(rule.midAlertRepeatCount) && rule.midAlertRepeatCount > 0 &&
     Array.isArray(rule.keyFraudTypes);
+}
+
+function hasSameVersion(current, preRead) {
+  return Boolean(current) && Boolean(preRead) &&
+    Number.isSafeInteger(current.version) &&
+    current.version === preRead.version;
 }
 
 function calculateManualAlertRisk({ fraudType, focusFlag, activeAlertCount, rule }) {
@@ -525,12 +532,12 @@ function calculateManualAlertRisk({ fraudType, focusFlag, activeAlertCount, rule
   return { riskLevel: 'low', riskReasons };
 }
 
-async function findTransactionRecordById(transaction, collectionName, id) {
-  return firstRecord(await transaction.collection(collectionName).doc(id).get());
+async function findRecordById(dbOrTransaction, collectionName, id) {
+  return firstRecord(await dbOrTransaction.collection(collectionName).doc(id).get());
 }
 
-async function findTransactionRecordByQuery(transaction, collectionName, query) {
-  return firstRecord(await transaction.collection(collectionName).where(query).limit(1).get());
+async function findRecordByQuery(db, collectionName, query) {
+  return firstRecord(await db.collection(collectionName).where(query).limit(1).get());
 }
 
 function createAlertCreateAudit({ alertId, actorId, riskLevel, requestId, serverDate, createAuditId }) {
@@ -621,35 +628,58 @@ function createSecurityAlertService({
       return internalFailure(requestId, 'securityAlertCreateClock');
     }
 
+    const targetIdentityKey = `student:${input.studentNo}`;
+    let preReadTargetStudent;
+    let preReadRule;
+    let activeAlertCount;
+    try {
+      preReadTargetStudent = await findRecordByQuery(db, 'users', { identityKey: targetIdentityKey });
+      if (!isActiveStudentTarget(preReadTargetStudent)) {
+        return failure('NOT_FOUND');
+      }
+
+      preReadRule = await findRecordById(db, 'risk_rules', 'rule_default');
+      if (!isEnabledDefaultRiskRule(preReadRule)) {
+        return internalFailure(requestId, 'securityAlertCreateRulePreRead');
+      }
+      const windowStart = new Date(requestNow.getTime() - (preReadRule.repeatAlertWindowDays * 24 * 60 * 60 * 1000));
+      const countResult = ensureDatabaseResult(await db.collection('alerts').where({
+        studentId: preReadTargetStudent._id,
+        status: db.command.in(ACTIVE_ALERT_STATUSES),
+        issuedAt: db.command.gte(windowStart),
+      }).count());
+      if (!Number.isSafeInteger(countResult.total) || countResult.total < 0) {
+        return internalFailure(requestId, 'securityAlertCreateActiveAlertCount');
+      }
+      activeAlertCount = countResult.total + 1;
+    } catch (error) {
+      return internalFailure(requestId, 'securityAlertCreatePreRead');
+    }
+
     const alertId = createAlertId();
     const auditId = createAuditId();
     try {
       const alert = await db.runTransaction(async (transaction) => {
-        const targetStudent = await findTransactionRecordByQuery(transaction, 'users', {
-          identityKey: `student:${input.studentNo}`,
-        });
-        if (!isActiveStudentTarget(targetStudent)) {
-          throw businessError('NOT_FOUND');
+        const targetStudent = await findRecordById(transaction, 'users', preReadTargetStudent._id);
+        if (!isActiveStudentTarget(targetStudent) ||
+          targetStudent._id !== preReadTargetStudent._id ||
+          targetStudent.identityKey !== targetIdentityKey ||
+          !hasSameVersion(targetStudent, preReadTargetStudent)) {
+          throw businessError('CONFLICT');
         }
 
-        const rule = await findTransactionRecordById(transaction, 'risk_rules', 'rule_default');
+        const rule = await findRecordById(transaction, 'risk_rules', 'rule_default');
         if (!isEnabledDefaultRiskRule(rule)) {
           throw businessError('INTERNAL_ERROR');
         }
-        const windowStart = new Date(requestNow.getTime() - (rule.repeatAlertWindowDays * 24 * 60 * 60 * 1000));
-        const countResult = ensureDatabaseResult(await transaction.collection('alerts').where({
-          studentId: targetStudent._id,
-          status: db.command.in(ACTIVE_ALERT_STATUSES),
-          issuedAt: db.command.gte(windowStart),
-        }).count());
-        if (!countResult || !Number.isSafeInteger(countResult.total) || countResult.total < 0) {
-          throw businessError('INTERNAL_ERROR');
+        if (!hasSameVersion(rule, preReadRule)) {
+          throw businessError('CONFLICT');
         }
 
         const risk = calculateManualAlertRisk({
           fraudType: input.fraudType,
           focusFlag: targetStudent.focusFlag,
-          activeAlertCount: countResult.total + 1,
+          activeAlertCount,
           rule,
         });
         const createdAlert = {
@@ -719,7 +749,7 @@ function createSecurityAlertService({
     const auditId = createAuditId();
     try {
       const alert = await db.runTransaction(async (transaction) => {
-        const currentAlert = await findTransactionRecordById(transaction, 'alerts', alertId);
+        const currentAlert = await findRecordById(transaction, 'alerts', alertId);
         if (!currentAlert) {
           throw businessError('NOT_FOUND');
         }
@@ -730,16 +760,12 @@ function createSecurityAlertService({
           throw businessError('CONFLICT');
         }
 
-        const targetStudent = await findTransactionRecordById(transaction, 'users', currentAlert.studentId);
+        const targetStudent = await findRecordById(transaction, 'users', currentAlert.studentId);
         if (!isActiveStudentTarget(targetStudent) || targetStudent.collegeId !== currentAlert.collegeId) {
           throw businessError('CONFLICT');
         }
 
-        const updateResult = ensureDatabaseResult(await transaction.collection('alerts').where({
-          _id: currentAlert._id,
-          status: 'pending_dispatch',
-          version: input.version,
-        }).update({
+        const updateResult = ensureDatabaseResult(await transaction.collection('alerts').doc(currentAlert._id).update({
           status: 'sent',
           issuedBy: authenticated.user._id,
           issuedAt: serverDate(),

@@ -73,6 +73,7 @@ function createMockDb({ users = [], riskRules = [], alerts = [], options = {} } 
     authAudits: [],
     queryTrace: [],
     conditionalUpdates: [],
+    transactionCollectionCapabilities: [],
     writes: [],
     transactionCalls: 0,
   };
@@ -102,14 +103,14 @@ function createMockDb({ users = [], riskRules = [], alerts = [], options = {} } 
   }
 
   function makeCollection(name, inTransaction = false) {
-    function writeDocuments(query, rawUpdate) {
+    function writeDocuments(query, rawUpdate, operation) {
       if (options.rejectDirectBusinessWrites && !inTransaction && (name === 'alerts' || name === 'audit_logs')) {
         throw new Error('Business writes must use a transaction handle');
       }
       const update = normalizeWrite(rawUpdate);
       const matched = documents(name).filter((document) => matches(document, query));
-      state.conditionalUpdates.push({ collection: name, query: clone(query), data: clone(update), inTransaction });
-      state.writes.push({ collection: name, operation: 'update', inTransaction });
+      state.conditionalUpdates.push({ collection: name, query: clone(query), data: clone(update), operation, inTransaction });
+      state.writes.push({ collection: name, operation, inTransaction });
       if (options.conditionUpdateZero && name === 'alerts') {
         return { updated: 0, updatedCount: 0, stats: { updated: 0 } };
       }
@@ -122,40 +123,39 @@ function createMockDb({ users = [], riskRules = [], alerts = [], options = {} } 
       return {
         async get() {
           const found = select().map(clone);
-          state.queryTrace.push({ collection: name, operation: 'get', query: clone(query), limit: null });
+          state.queryTrace.push({ collection: name, operation: 'get', query: clone(query), limit: null, inTransaction });
           return { data: found };
         },
         limit(limit) {
           return {
             async get() {
               const found = select().slice(0, limit).map(clone);
-              state.queryTrace.push({ collection: name, operation: 'get', query: clone(query), limit });
+              state.queryTrace.push({ collection: name, operation: 'get', query: clone(query), limit, inTransaction });
               return { data: found };
             },
           };
         },
         async count() {
           const total = select().length;
-          state.queryTrace.push({ collection: name, operation: 'count', query: clone(query), limit: null });
+          state.queryTrace.push({ collection: name, operation: 'count', query: clone(query), limit: null, inTransaction });
           return { total };
         },
         async update(rawUpdate) {
-          return writeDocuments(query, rawUpdate);
+          return writeDocuments(query, rawUpdate, 'where.update');
         },
       };
     }
 
-    return {
-      where: query,
+    const collection = {
       doc(id) {
         return {
           async get() {
             const document = documents(name).find((item) => item._id === id) || null;
-            state.queryTrace.push({ collection: name, operation: 'doc.get', query: { _id: id }, limit: 1 });
+            state.queryTrace.push({ collection: name, operation: 'doc.get', query: { _id: id }, limit: 1, inTransaction });
             return documentResult(document);
           },
           async update(rawUpdate) {
-            return writeDocuments({ _id: id }, rawUpdate);
+            return writeDocuments({ _id: id }, rawUpdate, 'doc.update');
           },
         };
       },
@@ -178,6 +178,11 @@ function createMockDb({ users = [], riskRules = [], alerts = [], options = {} } 
         return { id: document._id };
       },
     };
+    if (inTransaction) {
+      state.transactionCollectionCapabilities.push({ name, hasWhere: Object.hasOwn(collection, 'where') });
+      return collection;
+    }
+    return { ...collection, where: query };
   }
 
   const db = {
@@ -191,6 +196,9 @@ function createMockDb({ users = [], riskRules = [], alerts = [], options = {} } 
       state.transactionCalls += 1;
       const saved = snapshot();
       try {
+        if (typeof options.beforeTransaction === 'function') {
+          options.beforeTransaction(state);
+        }
         const result = await callback({ collection: (name) => makeCollection(name, true) });
         if (options.transactionConflict) {
           const error = new Error('write conflict');
@@ -475,8 +483,9 @@ test('4. 目标学生从规范化 student identityKey 解析，绝不把 student
   assert.equal(alert.sourceReference, 'ref-96110-1');
   assert.equal(alert.content, '请及时提高警惕，避免向陌生账号转账。');
   assert.equal(Object.hasOwn(alert, 'studentNo'), false);
-  assert.equal(fixture.state.queryTrace.some((entry) => entry.collection === 'users' &&
-    entry.query.identityKey === 'student:20260001'), true);
+  const targetLookup = fixture.state.queryTrace.find((entry) => entry.collection === 'users' &&
+    entry.query.identityKey === 'student:20260001');
+  assert.equal(targetLookup.inTransaction, false);
 });
 
 test('5. 非 student、inactive 或无学院的目标均以安全业务错误拒绝', async () => {
@@ -582,6 +591,7 @@ test('13. 仅统计窗口内 sent/viewed/following_up 的已有活动预警', as
   assert.deepEqual(activeQuery.query.status.values, ['sent', 'viewed', 'following_up']);
   assert.equal(activeQuery.query.issuedAt.__mockOperator, 'gte');
   assert.equal(activeQuery.query.issuedAt.value.getTime(), NOW.getTime() - 30 * DAY);
+  assert.equal(activeQuery.inTransaction, false);
 });
 
 test('14. 创建写入严格的 pending_dispatch/version=1 服务端快照', async () => {
@@ -614,6 +624,11 @@ test('15. create alert 与最小审计写入位于同一事务且不泄露敏感
   assert.equal(response.json.code, 'ALERT_CREATED');
   assert.equal(fixture.state.transactionCalls, 1);
   assert.equal(fixture.state.writes.every((write) => write.inTransaction), true);
+  assert.equal(fixture.state.transactionCollectionCapabilities.every((collection) => collection.hasWhere === false), true);
+  assert.equal(fixture.state.queryTrace.some((entry) => entry.collection === 'users' &&
+    entry.operation === 'doc.get' && entry.query._id === 'usr_student_001' && entry.inTransaction), true);
+  assert.equal(fixture.state.queryTrace.some((entry) => entry.collection === 'risk_rules' &&
+    entry.operation === 'doc.get' && entry.query._id === 'rule_default' && entry.inTransaction), true);
   assert.deepEqual({
     actorId: audit.actorId,
     actorRole: audit.actorRole,
@@ -660,7 +675,26 @@ test('16. 创建写入失败（抛错或 SDK 错误返回）时事务整体回�
   }
 });
 
-test('17. 两个业务路由都重读 security 用户，伪造、过期或失权 session 不能写入', async () => {
+test('17. 预读后 rule_default 版本变化时创建返回 CONFLICT 且回滚', async () => {
+  const fixture = await createFixture({
+    options: {
+      beforeTransaction: (state) => {
+        state.riskRules[0].version += 1;
+      },
+    },
+  });
+  const response = await createAlert(fixture);
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json.code, 'CONFLICT');
+  assertNoAlertMutation(fixture.state);
+  assert.equal(fixture.state.queryTrace.some((entry) => entry.collection === 'risk_rules' &&
+    entry.operation === 'doc.get' && entry.query._id === 'rule_default' && entry.inTransaction === false), true);
+  assert.equal(fixture.state.queryTrace.some((entry) => entry.collection === 'risk_rules' &&
+    entry.operation === 'doc.get' && entry.query._id === 'rule_default' && entry.inTransaction === true), true);
+});
+
+test('18. 两个业务路由都重读 security 用户，伪造、过期或失权 session 不能写入', async () => {
   const fixture = await createFixture();
   const [version, payload, signature] = fixture.token.split('.');
   const forged = `${version}.${payload}.${Buffer.from(`${signature}x`).toString('base64url')}`;
@@ -723,7 +757,7 @@ test('17. 两个业务路由都重读 security 用户，伪造、过期或失权
   }
 });
 
-test('18. dispatch body 只允许正安全整数 version 与唯一白名单字段', async () => {
+test('19. dispatch body 只允许正安全整数 version 与唯一白名单字段', async () => {
   const invalidBodies = [
     {}, { version: 0 }, { version: -1 }, { version: 1.5 }, { version: '1' },
     { version: Number.MAX_SAFE_INTEGER + 1 }, { version: 1, status: 'sent' },
@@ -743,7 +777,7 @@ test('18. dispatch body 只允许正安全整数 version 与唯一白名单字�
   }
 });
 
-test('19. dispatch 只允许 pending_dispatch 且 alert 必须存在', async () => {
+test('20. dispatch 只允许 pending_dispatch 且 alert 必须存在', async () => {
   const missingFixture = await createFixture();
   const missing = await dispatchAlert(missingFixture, 'alert_missing');
   assert.equal(missing.statusCode, 404);
@@ -757,7 +791,7 @@ test('19. dispatch 只允许 pending_dispatch 且 alert 必须存在', async () 
   assert.equal(sentFixture.state.audits.length, 0);
 });
 
-test('20. dispatch 需要精确匹配客户端版本', async () => {
+test('21. dispatch 需要精确匹配客户端版本', async () => {
   const fixture = await createFixture({ alerts: [pendingAlert({ version: 5 })] });
   const response = await dispatchAlert(fixture, 'alert_existing', { version: 4 });
 
@@ -768,20 +802,23 @@ test('20. dispatch 需要精确匹配客户端版本', async () => {
   assert.equal(fixture.state.audits.length, 0);
 });
 
-test('21. dispatch 条件更新必须匹配 _id、pending_dispatch 与 expected version', async () => {
+test('22. dispatch 在事务内按 doc 读取并更新 alert', async () => {
   const fixture = await createFixture({ alerts: [pendingAlert({ version: 7 })] });
   const response = await dispatchAlert(fixture, 'alert_existing', { version: 7 });
 
   assert.equal(response.json.ok, true);
-  assert.deepEqual(fixture.state.conditionalUpdates[0].query, {
-    _id: 'alert_existing',
-    status: 'pending_dispatch',
-    version: 7,
-  });
+  assert.deepEqual(fixture.state.conditionalUpdates[0].query, { _id: 'alert_existing' });
+  assert.equal(fixture.state.conditionalUpdates[0].operation, 'doc.update');
+  assert.equal(fixture.state.conditionalUpdates[0].inTransaction, true);
   assert.equal(fixture.state.conditionalUpdates[0].data.version, 8);
+  assert.equal(fixture.state.queryTrace.some((entry) => entry.collection === 'alerts' &&
+    entry.operation === 'doc.get' && entry.query._id === 'alert_existing' && entry.inTransaction), true);
+  assert.equal(fixture.state.queryTrace.some((entry) => entry.collection === 'users' &&
+    entry.operation === 'doc.get' && entry.query._id === 'usr_student_001' && entry.inTransaction), true);
+  assert.equal(fixture.state.transactionCollectionCapabilities.every((collection) => collection.hasWhere === false), true);
 });
 
-test('22. dispatch 条件更新 0 条时返回 CONFLICT 且事务回滚', async () => {
+test('23. dispatch doc.update 0 条时返回 CONFLICT 且事务回滚', async () => {
   const fixture = await createFixture({
     alerts: [pendingAlert()],
     options: { conditionUpdateZero: true },
@@ -795,7 +832,7 @@ test('22. dispatch 条件更新 0 条时返回 CONFLICT 且事务回滚', async 
   assert.equal(fixture.state.audits.length, 0);
 });
 
-test('23. 耗尽重试后的 CloudBase 事务冲突统一返回 CONFLICT 且回滚', async () => {
+test('24. 耗尽重试后的 CloudBase 事务冲突统一返回 CONFLICT 且回滚', async () => {
   const createFixtureWithConflict = await createFixture({ options: { transactionConflict: true } });
   const createResponse = await createAlert(createFixtureWithConflict);
   assert.equal(createResponse.statusCode, 409);
@@ -813,7 +850,7 @@ test('23. 耗尽重试后的 CloudBase 事务冲突统一返回 CONFLICT 且回�
   assert.equal(dispatchFixtureWithConflict.state.audits.length, 0);
 });
 
-test('24. dispatch 写入可信 security issuedBy、serverDate issuedAt 和 version+1', async () => {
+test('25. dispatch 写入可信 security issuedBy、serverDate issuedAt 和 version+1', async () => {
   const fixture = await createFixture({ alerts: [pendingAlert({ version: 2 })] });
   const response = await dispatchAlert(fixture, 'alert_existing', { version: 2 });
   const alert = fixture.state.alerts[0];
@@ -827,7 +864,7 @@ test('24. dispatch 写入可信 security issuedBy、serverDate issuedAt 和 vers
   assert.equal(alert.version, 3);
 });
 
-test('25. dispatch 与最小 alert.dispatch 审计同事务完成', async () => {
+test('26. dispatch 与最小 alert.dispatch 审计同事务完成', async () => {
   const fixture = await createFixture({
     alerts: [pendingAlert()],
     options: { rejectDirectBusinessWrites: true },
@@ -865,7 +902,7 @@ test('25. dispatch 与最小 alert.dispatch 审计同事务完成', async () => 
   }
 });
 
-test('26. dispatch 审计失败（抛错或 SDK 错误返回）时 alert 状态、版本和下发人全部回滚', async () => {
+test('27. dispatch 审计失败（抛错或 SDK 错误返回）时 alert 状态、版本和下发人全部回滚', async () => {
   for (const options of [{ auditFailure: true }, { auditResultFailure: true }]) {
     const fixture = await createFixture({
       alerts: [pendingAlert()],
@@ -885,7 +922,7 @@ test('26. dispatch 审计失败（抛错或 SDK 错误返回）时 alert 状态�
   }
 });
 
-test('27. dispatch 前重新验证目标学生和学院快照，不静默改写 collegeId', async () => {
+test('28. dispatch 前重新验证目标学生和学院快照，不静默改写 collegeId', async () => {
   const invalidTargets = [
     studentUser({ role: 'counselor' }),
     studentUser({ status: 'disabled' }),
@@ -907,7 +944,7 @@ test('27. dispatch 前重新验证目标学生和学院快照，不静默改写 
   }
 });
 
-test('28. 重复 dispatch 不会把 sent 重新写 sent', async () => {
+test('29. 重复 dispatch 不会把 sent 重新写 sent', async () => {
   const fixture = await createFixture({ alerts: [pendingAlert()] });
   const first = await dispatchAlert(fixture);
   const second = await dispatchAlert(fixture, 'alert_existing', { version: 2 });
@@ -920,7 +957,7 @@ test('28. 重复 dispatch 不会把 sent 重新写 sent', async () => {
   assert.equal(fixture.state.audits.length, 1);
 });
 
-test('29. /alerts OPTIONS 使用现有严格 CORS 逻辑', async () => {
+test('30. /alerts OPTIONS 使用现有严格 CORS 逻辑', async () => {
   const fixture = await createFixture();
   const response = await request(fixture.handler, {
     method: 'OPTIONS',
@@ -935,7 +972,7 @@ test('29. /alerts OPTIONS 使用现有严格 CORS 逻辑', async () => {
   assert.equal(response.headers['Access-Control-Allow-Methods'], 'POST, OPTIONS');
 });
 
-test('30. /alerts/:alertId/dispatch OPTIONS 使用现有严格 CORS 逻辑', async () => {
+test('31. /alerts/:alertId/dispatch OPTIONS 使用现有严格 CORS 逻辑', async () => {
   const fixture = await createFixture();
   const response = await request(fixture.handler, {
     method: 'OPTIONS',
@@ -949,7 +986,7 @@ test('30. /alerts/:alertId/dispatch OPTIONS 使用现有严格 CORS 逻辑', asy
   assert.equal(response.headers['Access-Control-Allow-Methods'], 'POST, OPTIONS');
 });
 
-test('31. 默认 handler 装配后仍以固定环境提供事务化预警路由', async () => {
+test('32. 默认 handler 装配后仍以固定环境提供事务化预警路由', async () => {
   const security = await securityUser();
   const mock = createMockDb({
     users: [security, studentUser()],
@@ -989,7 +1026,7 @@ test('31. 默认 handler 装配后仍以固定环境提供事务化预警路由'
   assert.equal(mock.state.writes.filter((write) => write.collection === 'alerts').every((write) => write.inTransaction), true);
 });
 
-test('32. 原 /login 与 /session 行为经扩展 handler 保持可用', async () => {
+test('33. 原 /login 与 /session 行为经扩展 handler 保持可用', async () => {
   const fixture = await createFixture();
   const login = await request(fixture.handler, {
     method: 'POST',
