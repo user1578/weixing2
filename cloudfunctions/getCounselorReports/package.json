@@ -1,0 +1,10 @@
+{
+  "name": "get-counselor-reports",
+  "version": "1.0.0",
+  "description": "Trusted Mini Program counselor report list",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {
+    "wx-server-sdk": "4.0.2"
+  }
+}
