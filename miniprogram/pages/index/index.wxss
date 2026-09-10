@@ -119,3 +119,8 @@ page {
 .bind_button {
   margin-top: 28rpx;
 }
+
+.student_report_button {
+  margin-top: 16rpx;
+  background-color: #1677ff;
+}

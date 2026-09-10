@@ -131,3 +131,11 @@ page {
   line-height: 1.8;
   white-space: pre-wrap;
 }
+
+.report_button {
+  margin: 34rpx 0 0;
+  border-radius: 40rpx;
+  background: #1677ff;
+  color: #ffffff;
+  font-size: 28rpx;
+}

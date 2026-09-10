@@ -20,6 +20,8 @@ const ALERT_STATUS_LABELS = Object.freeze({
   closed: "已关闭",
 });
 
+const REPORTABLE_ALERT_STATUSES = new Set(["sent", "viewed", "following_up"]);
+
 const ERROR_MESSAGES = Object.freeze({
   INVALID_INPUT: "预警信息无效",
   NOT_FOUND: "未找到该预警或暂无查看权限",
@@ -63,7 +65,12 @@ function toAlertView(alert = {}) {
     statusClass: knownClass("status", alert.status, ALERT_STATUS_LABELS),
     content: typeof alert.content === "string" && alert.content.trim() ? alert.content.trim() : "暂无预警内容",
     issuedAtText: formatDateTime(alert.issuedAt),
+    canReport: REPORTABLE_ALERT_STATUSES.has(alert.status),
   };
+}
+
+function buildReportUrl(alertId) {
+  return `/pages/reports/create/index?sourceAlertId=${encodeURIComponent(alertId)}`;
 }
 
 function messageFor(code) {
@@ -106,4 +113,13 @@ Page({
       this.setData({ loading: false });
     }
   },
+
+  goToStudentReport() {
+    if (!this.data.alert || !this.data.alert.canReport || typeof this.alertId !== "string" || !this.alertId) return;
+    wx.navigateTo({ url: buildReportUrl(this.alertId) });
+  },
 });
+
+if (typeof module !== "undefined") {
+  module.exports = { __testables: { buildReportUrl, toAlertView } };
+}

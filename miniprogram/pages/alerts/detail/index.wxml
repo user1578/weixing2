@@ -25,5 +25,7 @@
 
     <view class="content_label">安全提醒</view>
     <view class="content">{{alert.content}}</view>
+
+    <button class="report_button" wx:if="{{alert.canReport}}" bindtap="goToStudentReport">一键上报</button>
   </view>
 </view>

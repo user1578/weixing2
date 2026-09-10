@@ -1,0 +1,46 @@
+<view class="page">
+  <view class="success_card" wx:if="{{submitted && report}}">
+    <view class="success_title">上报提交成功</view>
+    <view class="success_hint" wx:if="{{sourceAlertId}}">已关联本次风险预警</view>
+    <view class="result_row"><view>工单编号</view><view class="result_value">{{report.reportId}}</view></view>
+    <view class="result_row"><view>诈骗类型</view><view class="result_value">{{report.fraudTypeText}}</view></view>
+    <view class="result_row"><view>风险等级</view><view class="risk_tag {{report.riskClass}}">{{report.riskLevelText}}</view></view>
+    <view class="result_row"><view>状态</view><view class="result_value">{{report.statusText}}</view></view>
+    <view class="result_row"><view>提交时间</view><view class="result_value">{{report.submittedAtText}}</view></view>
+    <button class="primary_button" bindtap="returnHome">返回首页</button>
+    <button class="secondary_button" wx:if="{{sourceAlertId}}" bindtap="returnToAlert">返回预警</button>
+  </view>
+
+  <view wx:else>
+    <view class="page_header">
+      <view class="page_title">一键上报</view>
+      <view class="page_subtitle">请如实填写，系统将安排后续核实</view>
+    </view>
+    <view class="source_tip" wx:if="{{sourceAlertId}}">本次上报将关联当前风险预警</view>
+
+    <view class="form_card">
+      <view class="field_label">诈骗类型<text class="required">*</text></view>
+      <picker mode="selector" range="{{fraudTypes}}" range-key="label" value="{{fraudTypeIndex}}" bindchange="onFraudTypeChange"><view class="field_value">{{fraudTypes[fraudTypeIndex].label}}</view></picker>
+      <view class="field_label">发生日期<text class="required">*</text></view>
+      <picker mode="date" value="{{incidentDate}}" bindchange="onFieldInput" data-field="incidentDate"><view class="field_value">{{incidentDate}}</view></picker>
+      <view class="field_label">发生时间<text class="required">*</text></view>
+      <picker mode="time" value="{{incidentTime}}" bindchange="onFieldInput" data-field="incidentTime"><view class="field_value">{{incidentTime}}</view></picker>
+      <view class="field_label">涉及金额（元）<text class="required">*</text></view>
+      <input class="field_input" type="digit" value="{{involvedAmount}}" placeholder="可填写 0" bindinput="onFieldInput" data-field="involvedAmount" />
+      <view class="switch_row"><view class="field_label no_margin">是否已产生实际经济损失<text class="required">*</text></view><switch checked="{{hasLoss}}" bindchange="onHasLossChange" color="#1677ff" /></view>
+      <view class="field_label">事件经过<text class="required">*</text></view>
+      <textarea class="textarea" value="{{incidentNarrative}}" maxlength="2000" placeholder="请简要说明事件经过" bindinput="onFieldInput" data-field="incidentNarrative" />
+      <view class="field_label">涉及平台</view>
+      <input class="field_input" value="{{suspiciousPlatform}}" maxlength="100" bindinput="onFieldInput" data-field="suspiciousPlatform" />
+      <view class="field_label">可疑账号或网址</view>
+      <input class="field_input" value="{{suspiciousAccount}}" maxlength="300" bindinput="onFieldInput" data-field="suspiciousAccount" />
+      <view class="switch_row"><view class="field_label no_margin">是否仍与可疑方联系</view><switch checked="{{stillContacting}}" bindchange="onStillContactingChange" color="#1677ff" /></view>
+      <view class="field_label">回访联系电话</view>
+      <input class="field_input" type="number" value="{{contactPhone}}" maxlength="32" bindinput="onFieldInput" data-field="contactPhone" />
+      <view class="field_label">补充说明</view>
+      <textarea class="textarea short_textarea" value="{{studentRemark}}" maxlength="500" bindinput="onFieldInput" data-field="studentRemark" />
+      <view class="error_message" wx:if="{{errorMessage}}">{{errorMessage}}</view>
+      <button class="primary_button" bindtap="submitReport" loading="{{submitting}}" disabled="{{submitting || submitted}}">提交上报</button>
+    </view>
+  </view>
+</view>

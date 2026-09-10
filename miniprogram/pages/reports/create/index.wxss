@@ -1,0 +1,28 @@
+page { min-height: 100%; background: #f6f7f9; }
+.page { box-sizing: border-box; padding: 36rpx 30rpx 56rpx; }
+.page_header { margin-bottom: 28rpx; }
+.page_title { color: #1f2937; font-size: 42rpx; font-weight: 600; }
+.page_subtitle { margin-top: 10rpx; color: #7a8494; font-size: 26rpx; }
+.source_tip { margin-bottom: 20rpx; padding: 20rpx 24rpx; border-radius: 12rpx; background: #edf4ff; color: #3970bd; font-size: 27rpx; }
+.form_card, .success_card { box-sizing: border-box; padding: 30rpx; border-radius: 16rpx; background: #ffffff; box-shadow: 0 4rpx 16rpx rgba(35, 46, 66, 0.06); }
+.field_label { margin: 26rpx 0 12rpx; color: #344054; font-size: 28rpx; }
+.required { margin-left: 6rpx; color: #d14343; }
+.field_value, .field_input, .textarea { box-sizing: border-box; width: 100%; border: 1rpx solid #d9e0ea; border-radius: 10rpx; background: #ffffff; color: #1f2937; font-size: 28rpx; }
+.field_value, .field_input { min-height: 80rpx; padding: 20rpx; }
+.textarea { min-height: 180rpx; padding: 18rpx 20rpx; line-height: 1.6; }
+.short_textarea { min-height: 130rpx; }
+.switch_row { display: flex; align-items: center; justify-content: space-between; margin-top: 26rpx; }
+.no_margin { margin: 0; }
+.primary_button, .secondary_button { margin: 34rpx 0 0; border-radius: 40rpx; font-size: 28rpx; }
+.primary_button { background: #1677ff; color: #ffffff; }
+.secondary_button { background: #edf4ff; color: #3970bd; }
+.error_message { margin-top: 22rpx; color: #c2413c; font-size: 26rpx; line-height: 1.5; }
+.success_title { color: #16804d; font-size: 40rpx; font-weight: 600; text-align: center; }
+.success_hint { margin: 16rpx 0 26rpx; color: #3970bd; font-size: 27rpx; text-align: center; }
+.result_row { display: flex; align-items: center; justify-content: space-between; gap: 24rpx; margin-top: 26rpx; color: #7a8494; font-size: 27rpx; }
+.result_value { min-width: 0; color: #344054; text-align: right; word-break: break-all; }
+.risk_tag { flex: none; padding: 5rpx 14rpx; border-radius: 20rpx; font-size: 23rpx; }
+.risk-low { background: #e9f8ef; color: #23824b; }
+.risk-medium { background: #fff4dc; color: #af6900; }
+.risk-high { background: #ffebe9; color: #ca3f34; }
+.risk-unknown { background: #eef1f5; color: #687385; }

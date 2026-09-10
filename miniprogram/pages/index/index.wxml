@@ -19,6 +19,7 @@
       <view class="student_alert_entry" wx:if="{{profile.role === 'student'}}">
         <view class="student_alert_hint">学生服务</view>
         <button class="primary_button" bindtap="goToStudentAlerts">查看我的预警</button>
+        <button class="primary_button student_report_button" bindtap="goToStudentReport">一键上报</button>
       </view>
     </view>
     <view class="bind_form" wx:if="{{sessionCode === 'UNBOUND'}}">
