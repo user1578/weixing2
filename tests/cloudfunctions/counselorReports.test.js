@@ -83,16 +83,33 @@ function createMockDb({ users = [baseCounselor(), baseStudent()], reports = [], 
   const rowsFor = (name) => ({ users: state.users, fraud_reports: state.reports, audit_logs: state.audits }[name]);
   const collection = (name) => ({
     where(query) {
+      const read = async ({ limit = null, orderBy = null } = {}) => {
+        const rows = rowsFor(name).filter((row) => matches(row, query));
+        if (orderBy) {
+          rows.sort((left, right) => {
+            if (left[orderBy.field] === right[orderBy.field]) return 0;
+            const comparison = left[orderBy.field] > right[orderBy.field] ? 1 : -1;
+            return orderBy.direction === 'desc' ? -comparison : comparison;
+          });
+        }
+        state.queryTrace.push({ collection: name, query: clone(query), limit, orderBy: clone(orderBy) });
+        return { data: (limit === null ? rows : rows.slice(0, limit)).map(clone) };
+      };
       const get = async () => {
-        state.queryTrace.push({ collection: name, query: clone(query), limit: null });
-        return { data: rowsFor(name).filter((row) => matches(row, query)).map(clone) };
+        return read();
       };
       return {
         limit(limit) {
           return {
-            get: async () => {
-              state.queryTrace.push({ collection: name, query: clone(query), limit });
-              return { data: rowsFor(name).filter((row) => matches(row, query)).slice(0, limit).map(clone) };
+            get: async () => read({ limit }),
+          };
+        },
+        orderBy(field, direction) {
+          return {
+            limit(limit) {
+              return {
+                get: async () => read({ limit, orderBy: { field, direction } }),
+              };
             },
           };
         },
@@ -225,11 +242,33 @@ test('14. 同风险按 submittedAt 从早到晚排序', async () => {
   assert.deepEqual((await listHandler({})).reports.map((report) => report.reportId), ['old', 'new']);
 });
 
-test('15. 列表最多返回 100 条', async () => {
-  const reports = Array.from({ length: 101 }, (_, index) => baseReport({ _id: `report_${index}`, submittedAt: `2026-09-08T09:${String(index % 60).padStart(2, '0')}:00.000Z` }));
+test('15. 数据库先取最新 100 条，再按既有业务优先级排序', async () => {
+  const recentReports = Array.from({ length: 100 }, (_, index) => baseReport({
+    _id: `recent_${index}`,
+    submittedAt: new Date(Date.UTC(2026, 8, 9, 0, 0, index)).toISOString(),
+    riskLevel: index === 70 ? 'high' : index === 15 ? 'medium' : 'low',
+  }));
+  const oldestReport = baseReport({
+    _id: 'oldest_excluded',
+    submittedAt: '2026-01-01T00:00:00.000Z',
+    riskLevel: 'high',
+  });
+  const reports = [oldestReport, ...recentReports.reverse()];
   const { listHandler, state } = makeHandlers({ reports });
-  assert.equal((await listHandler({})).reports.length, 100);
-  assert.equal(state.queryTrace.find((entry) => entry.collection === 'fraud_reports').limit, 100);
+  const response = await listHandler({});
+  const query = state.queryTrace.find((entry) => entry.collection === 'fraud_reports');
+
+  assert.deepEqual(query, {
+    collection: 'fraud_reports',
+    query: { collegeId: 'college_cs', status: 'pending_counselor_verify' },
+    limit: 100,
+    orderBy: { field: 'submittedAt', direction: 'desc' },
+  });
+  assert.equal(response.reports.length, 100);
+  assert.equal(response.reports.some((report) => report.reportId === 'oldest_excluded'), false);
+  assert.deepEqual(new Set(response.reports.map((report) => report.reportId)), new Set(recentReports.map((report) => report._id)));
+  assert.deepEqual(response.reports.slice(0, 3).map((report) => report.reportId), ['recent_70', 'recent_15', 'recent_0']);
+  assert.equal(response.reports.at(-1).reportId, 'recent_99');
 });
 
 test('16. 列表不泄露 studentId', async () => {

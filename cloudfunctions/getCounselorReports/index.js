@@ -132,7 +132,7 @@ function createHandler({
       const result = await db.collection('fraud_reports').where({
         collegeId: counselor.collegeId,
         status: 'pending_counselor_verify',
-      }).limit(MAX_REPORTS).get();
+      }).orderBy('submittedAt', 'desc').limit(MAX_REPORTS).get();
       const reports = (Array.isArray(result.data) ? result.data : [])
         .sort(compareReports)
         .map(toListItem);
