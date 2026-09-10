@@ -150,6 +150,10 @@ function toIssuedAtMillis(value) {
   return Number.NaN;
 }
 
+function isValidDate(value) {
+  return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
 async function countActiveAlerts(db, studentId, rule, now, command) {
   const windowStart = new Date(now.getTime() - rule.repeatAlertWindowDays * 24 * 60 * 60 * 1000);
   const query = command && typeof command.in === 'function' && typeof command.gte === 'function'
@@ -222,6 +226,8 @@ function createHandler({
       }
     };
     try {
+      const requestNow = now();
+      if (!isValidDate(requestNow)) throw new Error('invalid server time');
       const input = validateInput(event);
       if (!input) return failure('INVALID_INPUT', '请求参数无效');
       const wxContext = getWXContext() || {};
@@ -252,7 +258,7 @@ function createHandler({
       const rule = await getById(db, 'risk_rules', 'rule_default');
       if (!rule) return failure('NOT_FOUND', '风险规则不存在');
       if (!validRiskRule(rule)) return failure('INTERNAL_ERROR', '风险规则配置异常');
-      const activeAlertCount = await countActiveAlerts(db, student._id, rule, now(), command);
+      const activeAlertCount = await countActiveAlerts(db, student._id, rule, requestNow, command);
       const risk = calculateRisk({ input, student, rule, activeAlertCount });
       const report = makeReport({ reportId, student, input, sourceAlertKey, risk, serverDate });
 
@@ -279,7 +285,7 @@ function createHandler({
       }
       return success('REPORT_SUBMITTED', { report: {
         reportId, sourceAlertId: input.sourceAlertId || null, fraudType: report.fraudType, riskLevel: report.riskLevel,
-        riskReasons: report.riskReasons, status: report.status, version: report.version, submittedAt: report.submittedAt,
+        riskReasons: report.riskReasons, status: report.status, version: report.version, submittedAt: requestNow.toISOString(),
       } });
     } catch (error) {
       logger.error({ requestId, code: 'INTERNAL_ERROR', resourceId: null, stage: 'createStudentReport' });
@@ -298,6 +304,6 @@ exports.main = async (event) => createDefaultHandler()(event);
 exports.__testables = {
   ACCEPTED_EVENT_KEYS, EXPECTED_APP_ID, TARGET_ENV_ID, calculateRisk, countActiveAlerts, createAccessDeniedAuditLog,
   createDefaultHandler, createHandler, createSubmitAuditLog, findExistingReport, findUserByWxIdentityKey, getById,
-  hasStudentCollege, isBoundToTrustedOpenId, isConflict, isTrustedActiveStudent, makeReport, normalizeOptionalString,
+  hasStudentCollege, isBoundToTrustedOpenId, isConflict, isTrustedActiveStudent, isValidDate, makeReport, normalizeOptionalString,
   parseIncidentAt, validRiskRule, validateInput,
 };

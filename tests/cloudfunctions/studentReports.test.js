@@ -49,7 +49,7 @@ function queryMatches(document, query) {
 }
 
 function createMockDb({ users = [baseStudent()], alerts = [], reports = [], rule = baseRule(), options = {} } = {}) {
-  const state = { users: clone(users), alerts: clone(alerts), reports: clone(reports), rules: rule ? [clone(rule)] : [], audits: [], transactionCalls: 0, transactionWhereCalls: 0 };
+  const state = { users: clone(users), alerts: clone(alerts), reports: clone(reports), rules: rule ? [clone(rule)] : [], audits: [], queries: [], transactionCalls: 0, transactionWhereCalls: 0 };
   const rowsFor = (name) => ({ users: state.users, alerts: state.alerts, fraud_reports: state.reports, risk_rules: state.rules, audit_logs: state.audits }[name]);
   const collection = (name, transactional = false) => ({
     where(query) {
@@ -57,6 +57,7 @@ function createMockDb({ users = [baseStudent()], alerts = [], reports = [], rule
         state.transactionWhereCalls += 1;
         throw new Error('transactions must not use where');
       }
+      state.queries.push({ collection: name, query: clone(query) });
       const get = async () => ({ data: rowsFor(name).filter((row) => queryMatches(row, query)).map(clone) });
       return { get, limit: () => ({ get }) };
     },
@@ -98,7 +99,7 @@ function makeHandler(config = {}) {
     ...mock, logs,
     handler: reportModule.__testables.createHandler({
       db: mock.db, getWXContext: () => config.wxContext || trustedContext,
-      serverDate: () => ({ $serverDate: ++ids }), now: () => new Date('2026-09-10T00:00:00.000Z'),
+      serverDate: () => ({ $serverDate: ++ids }), now: config.now || (() => new Date('2026-09-10T00:00:00.000Z')),
       createRequestId: () => 'req_report', createReportId: () => 'report_fixed', createAuditId: () => `audit_${++ids}`,
       logger: { error: (entry) => logs.push(entry) },
     }),
@@ -457,4 +458,32 @@ test('52. 成功日志不输出，失败日志仅记录安全字段', async () =
   await failed.handler(validEvent({ incidentNarrative: '不得记录的正文' }));
   assert.deepEqual(Object.keys(failed.logs[0]).sort(), ['code', 'requestId', 'resourceId', 'stage']);
   assert.equal(JSON.stringify(failed.logs[0]).includes('不得记录的正文'), false);
+});
+
+test('53. 成功响应 submittedAt 是可解析 ISO，数据库仍使用 serverDate', async () => {
+  const requestNow = new Date('2026-09-10T08:09:10.000Z');
+  const { handler, state } = makeHandler({ now: () => requestNow });
+  const response = await handler(validEvent());
+  assert.equal(typeof response.report.submittedAt, 'string');
+  assert.equal(new Date(response.report.submittedAt).getTime(), requestNow.getTime());
+  assert.deepEqual(state.reports[0].submittedAt, { $serverDate: 1 });
+  assert.equal(typeof state.reports[0].submittedAt, 'object');
+});
+
+test('54. 无效可信服务端时间安全返回 INTERNAL_ERROR', async () => {
+  for (const now of [() => new Date('invalid'), () => '2026-09-10T00:00:00.000Z']) {
+    const { handler } = makeHandler({ now });
+    assert.equal((await handler(validEvent())).code, 'INTERNAL_ERROR');
+  }
+});
+
+test('55. 活动预警统计与响应提交时间使用同一次 requestNow', async () => {
+  const requestNow = new Date('2026-09-10T12:00:00.000Z');
+  let calls = 0;
+  const { handler, state } = makeHandler({ now: () => { calls += 1; return requestNow; } });
+  const response = await handler(validEvent());
+  const alertsQuery = state.queries.find((entry) => entry.collection === 'alerts');
+  assert.equal(calls, 1);
+  assert.equal(response.report.submittedAt, requestNow.toISOString());
+  assert.equal(alertsQuery.query.issuedAt.$gte.getTime(), new Date('2026-08-11T12:00:00.000Z').getTime());
 });

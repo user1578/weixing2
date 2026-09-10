@@ -62,6 +62,7 @@ test('8. 成功结果映射只保留展示字段', () => {
   const view = create.mapReportResult({ ok: true, code: 'REPORT_SUBMITTED', report: { reportId: 'report_001', fraudType: 'other', riskLevel: 'high', submittedAt: '2026-09-10T00:00:00.000Z', studentId: 'secret', collegeId: 'secret', sourceAlertKey: 'secret' } });
   assert.deepEqual(Object.keys(view).sort(), ['fraudTypeText', 'reportId', 'riskClass', 'riskLevelText', 'statusText', 'submittedAtText']);
   assert.equal(JSON.stringify(view).includes('secret'), false);
+  assert.notEqual(view.submittedAtText, '暂无时间');
 });
 
 test('9. 错误码映射安全且 CONFLICT 中文提示正确', () => {
