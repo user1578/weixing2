@@ -185,11 +185,13 @@ test('7. 当前 OPENID 无绑定时返回 UNBOUND', async () => {
   assert.equal((await handler({ targetRole: 'counselor' })).code, 'UNBOUND');
 });
 
-test('8. 非固定 demo 账号不能取得切换能力', async () => {
-  const attacker = baseStudent({ _id: 'usr_attacker', wxIdentityKey: `openid:${trustedContext.OPENID}`, wxOpenId: trustedContext.OPENID });
+test('8. 非固定 demo 账号不能取得切换能力且审计保留真实学院', async () => {
+  const attacker = baseStudent({ _id: 'usr_attacker', collegeId: 'college_other', wxIdentityKey: `openid:${trustedContext.OPENID}`, wxOpenId: trustedContext.OPENID });
   const { handler, state } = makeSwitch({ users: [attacker, baseCounselor()] });
   assert.equal((await handler({ targetRole: 'counselor' })).code, 'FORBIDDEN');
   assert.equal(state.audits[0].result, 'failure');
+  assert.equal(state.audits[0].actorId, 'usr_attacker');
+  assert.equal(state.audits[0].actorCollegeId, 'college_other');
 });
 
 test('9. student 可原子切换为 counselor，平台注入字段被忽略', async () => {
@@ -388,4 +390,18 @@ test('36. 成功审计写入失败时两个用户更新整体回滚', async () =
   assert.equal(state.users[0].bindStatus, 'bound');
   assert.equal(state.users[1].bindStatus, 'unbound');
   assert.equal(state.audits.length, 0);
+});
+
+test('37. 可信 security 用户被拒绝时失败审计学院为 null', async () => {
+  const security = baseStudent({
+    _id: 'usr_security_other',
+    role: 'security',
+    collegeId: 'college_other',
+    wxIdentityKey: `openid:${trustedContext.OPENID}`,
+    wxOpenId: trustedContext.OPENID,
+  });
+  const { handler, state } = makeSwitch({ users: [security, baseCounselor()] });
+  assert.equal((await handler({ targetRole: 'counselor' })).code, 'FORBIDDEN');
+  assert.equal(state.audits[0].actorId, 'usr_security_other');
+  assert.equal(state.audits[0].actorCollegeId, null);
 });

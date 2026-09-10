@@ -62,6 +62,15 @@ function hasValidVersion(user) {
   return user && Number.isSafeInteger(user.version) && user.version > 0;
 }
 
+function actorCollegeId(current) {
+  if (!current || current.role === 'security') return null;
+  if ((current.role === 'student' || current.role === 'counselor') &&
+    typeof current.collegeId === 'string' && current.collegeId.trim().length > 0) {
+    return current.collegeId;
+  }
+  return null;
+}
+
 function isBoundToTrustedOpenId(user, trustedOpenId) {
   return user && user.bindStatus === 'bound' &&
     typeof user.wxOpenId === 'string' && user.wxOpenId.length > 0 &&
@@ -104,7 +113,7 @@ function createSwitchAuditLog({ current, target, requestId, serverDate, createAu
     _id: createAuditId(),
     actorId: current._id,
     actorRole: current.role,
-    actorCollegeId: DEMO_COLLEGE_ID,
+    actorCollegeId: actorCollegeId(current),
     action: 'identity.demo_switch',
     resourceType: 'user',
     resourceId: target._id,
@@ -121,7 +130,7 @@ function createFailureAuditLog({ current, code, resourceId, requestId, serverDat
     _id: createAuditId(),
     actorId: current._id,
     actorRole: current.role,
-    actorCollegeId: DEMO_COLLEGE_ID,
+    actorCollegeId: actorCollegeId(current),
     action: 'identity.demo_switch',
     resourceType: 'user',
     resourceId: resourceId || current._id,
@@ -325,6 +334,7 @@ exports.__testables = {
   EXPECTED_ROLE_BY_ID,
   TARGET_ENV_ID,
   TARGET_ID_BY_ROLE,
+  actorCollegeId,
   createDefaultHandler,
   createFailureAuditLog,
   createHandler,
