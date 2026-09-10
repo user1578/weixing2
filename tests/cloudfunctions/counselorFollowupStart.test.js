@@ -115,21 +115,22 @@ test('16. 非待辅导员核实状态拒绝', async () => assert.equal((await ma
 test('17. expectedVersion 冲突', async () => assert.equal((await makeHandler({ reports: [baseReport({ version: 2 })] }).handler(validEvent())).code, 'CONFLICT'));
 test('18. 他人已占用处理人', async () => assert.equal((await makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_other' })] }).handler(validEvent())).code, 'CONFLICT'));
 test('19. pending followup 幂等', async () => {
-  const { handler } = makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_counselor_001' })], followups: [{ _id: 'followup_old', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'pending' }] });
+  const { handler, state } = makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_counselor_001', version: 2 })], followups: [{ _id: 'followup_old', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'pending' }] });
   assert.equal((await handler(validEvent())).code, 'FOLLOWUP_ALREADY_STARTED');
+  assert.equal(state.transactionCalls, 0); assert.equal(state.followups.length, 1); assert.equal(state.conditionalUpdates.length, 0); assert.equal(state.audits.length, 0);
 });
 test('20. in_progress followup 幂等', async () => {
-  const { handler } = makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_counselor_001' })], followups: [{ _id: 'followup_old', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'in_progress' }] });
+  const { handler } = makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_counselor_001', version: 2 })], followups: [{ _id: 'followup_old', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'in_progress' }] });
   assert.equal((await handler(validEvent())).code, 'FOLLOWUP_ALREADY_STARTED');
 });
 test('21. 幂等调用零新增 followup', async () => {
-  const { handler, state } = makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_counselor_001' })], followups: [{ _id: 'old', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'pending' }] }); await handler(validEvent()); assert.equal(state.followups.length, 1);
+  const { handler, state } = makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_counselor_001', version: 2 })], followups: [{ _id: 'old', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'pending' }] }); await handler(validEvent()); assert.equal(state.followups.length, 1);
 });
 test('22. 幂等调用零 report 更新', async () => {
-  const { handler, state } = makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_counselor_001' })], followups: [{ _id: 'old', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'pending' }] }); await handler(validEvent()); assert.equal(state.conditionalUpdates.length, 0);
+  const { handler, state } = makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_counselor_001', version: 2 })], followups: [{ _id: 'old', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'pending' }] }); await handler(validEvent()); assert.equal(state.conditionalUpdates.length, 0);
 });
 test('23. 幂等调用零成功审计', async () => {
-  const { handler, state } = makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_counselor_001' })], followups: [{ _id: 'old', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'pending' }] }); await handler(validEvent()); assert.equal(state.audits.length, 0);
+  const { handler, state } = makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_counselor_001', version: 2 })], followups: [{ _id: 'old', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'pending' }] }); await handler(validEvent()); assert.equal(state.audits.length, 0); assert.equal(state.transactionCalls, 0);
 });
 test('24. 当前辅导员无 followup 时失败', async () => assert.equal((await makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_counselor_001' })] }).handler(validEvent())).code, 'INTERNAL_ERROR'));
 test('25. 多条未完成 followup 时失败', async () => assert.equal((await makeHandler({ reports: [baseReport({ currentHandlerId: 'usr_counselor_001' })], followups: [{ _id: 'a', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'pending' }, { _id: 'b', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'in_progress' }] }).handler(validEvent())).code, 'INTERNAL_ERROR'));
@@ -166,4 +167,11 @@ test('54. TARGET_ENV_ID 固定正确', () => {
   const db = { serverDate: () => ({}), collection: () => ({}), runTransaction: async () => ({}) };
   followupModule.__testables.createDefaultHandler({ init: ({ env }) => environments.push(env), database: () => db, getWXContext: () => trustedContext });
   assert.deepEqual(environments, ['aa-d4gvb4o3t50fc94f8']);
+});
+test('55. 空处理人遇到旧版本仍返回 CONFLICT', async () => {
+  assert.equal((await makeHandler({ reports: [baseReport({ version: 2, currentHandlerId: null })] }).handler(validEvent())).code, 'CONFLICT');
+});
+test('56. 他人处理时即使版本不一致也不返回幂等成功', async () => {
+  const { handler, state } = makeHandler({ reports: [baseReport({ version: 2, currentHandlerId: 'usr_other' })], followups: [{ _id: 'old', businessType: 'report', businessId: 'report_001', counselorId: 'usr_counselor_001', status: 'pending' }] });
+  assert.equal((await handler(validEvent())).code, 'CONFLICT'); assert.equal(state.transactionCalls, 0);
 });

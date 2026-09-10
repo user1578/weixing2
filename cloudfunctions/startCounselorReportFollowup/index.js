@@ -145,10 +145,6 @@ function createHandler({
         return denied(counselor, 'FORBIDDEN', '无权操作其他学院工单', 'reportCollegeScope', 'fraud_report', report._id);
       }
       if (report.status !== 'pending_counselor_verify') return failure('INVALID_STATE', '当前工单状态不能开始跟进');
-      if (report.version !== input.expectedVersion) return failure('CONFLICT', '工单已变化，请刷新后重试');
-      if (report.currentHandlerId !== undefined && report.currentHandlerId !== null && report.currentHandlerId !== counselor._id) {
-        return failure('CONFLICT', '工单已由其他辅导员跟进');
-      }
       if (report.currentHandlerId === counselor._id) {
         const existing = await findUnfinishedFollowups(db, report._id, counselor._id);
         if (existing.length === 1) return success('FOLLOWUP_ALREADY_STARTED', { followup: {
@@ -156,6 +152,10 @@ function createHandler({
         } });
         return failure('INTERNAL_ERROR', '工单跟进数据异常，请联系管理员');
       }
+      if (report.currentHandlerId !== undefined && report.currentHandlerId !== null) {
+        return failure('CONFLICT', '工单已由其他辅导员跟进');
+      }
+      if (report.version !== input.expectedVersion) return failure('CONFLICT', '工单已变化，请刷新后重试');
 
       const followupId = createFollowupId();
       try {
