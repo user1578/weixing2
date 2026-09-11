@@ -262,3 +262,259 @@ dd {
     gap: 4px;
   }
 }
+
+.admin-shell {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  width: min(100%, 1320px);
+  min-height: calc(100vh - 48px);
+  overflow: hidden;
+  border: 1px solid #dbe3ef;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 18px 45px rgb(23 32 51 / 12%);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  padding: 28px 18px;
+  background: #f7faff;
+  border-right: 1px solid #dbe7f7;
+}
+
+.sidebar-brand strong {
+  color: #174ea6;
+  font-size: 20px;
+}
+
+.side-nav {
+  display: grid;
+  gap: 8px;
+  margin-top: 38px;
+}
+
+.side-nav button {
+  min-height: 42px;
+  padding: 10px 14px;
+  color: #43536b;
+  text-align: left;
+  background: transparent;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.side-nav button:hover,
+.side-nav button.active {
+  color: #124aa8;
+  background: #e7f0ff;
+}
+
+.sidebar-footer {
+  display: grid;
+  gap: 12px;
+  margin-top: auto;
+}
+
+.sidebar-footer p {
+  margin: 0;
+  color: #52627b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.admin-content {
+  min-width: 0;
+  padding: 34px;
+  background: #fff;
+}
+
+.admin-header,
+.section-page-header,
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.admin-header {
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e6edf7;
+}
+
+.section-page-header {
+  margin-bottom: 24px;
+}
+
+.section-page-header h2,
+.modal-header h2 {
+  color: #172033;
+}
+
+.section-page-header p,
+.modal-header p,
+.welcome-panel > p:last-child {
+  margin: 8px 0 0;
+  color: #60708a;
+  line-height: 1.6;
+}
+
+.welcome-panel {
+  max-width: 720px;
+}
+
+.identity-page {
+  min-width: 0;
+}
+
+.identity-panel {
+  margin-top: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.table-state {
+  margin: 0;
+  padding: 36px 24px;
+  color: #60708a;
+  text-align: center;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.identity-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.identity-table th,
+.identity-table td {
+  padding: 16px;
+  border-bottom: 1px solid #e6edf7;
+  color: #35425a;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.identity-table th {
+  color: #60708a;
+  background: #f8fbff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.identity-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.identity-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.text-button {
+  min-height: auto;
+  padding: 0;
+  color: #175cd3;
+  background: transparent;
+  font-size: 13px;
+}
+
+.text-button:hover:not(:disabled) {
+  color: #124aa8;
+  background: transparent;
+}
+
+.status-pill {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-pill.bound,
+.status-pill.active {
+  color: #126b38;
+  background: #eaf8ef;
+}
+
+.status-pill.unbound {
+  color: #405572;
+  background: #edf2f7;
+}
+
+.status-pill.suspended {
+  color: #a32020;
+  background: #fff0f0;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  padding: 24px;
+  overflow-y: auto;
+  place-items: center;
+  background: rgb(23 32 51 / 42%);
+}
+
+.identity-modal {
+  width: min(100%, 520px);
+  padding: 28px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 20px 50px rgb(23 32 51 / 25%);
+}
+
+.identity-form {
+  display: grid;
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.field-hint {
+  color: #60708a;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+@media (max-width: 760px) {
+  .admin-shell {
+    grid-template-columns: 1fr;
+    min-height: calc(100vh - 24px);
+  }
+
+  .sidebar {
+    padding: 18px;
+    border-right: 0;
+    border-bottom: 1px solid #dbe7f7;
+  }
+
+  .side-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 18px;
+  }
+
+  .sidebar-footer {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    margin-top: 18px;
+  }
+
+  .admin-content {
+    padding: 24px;
+  }
+
+  .admin-header,
+  .section-page-header,
+  .modal-header {
+    flex-direction: column;
+  }
+}

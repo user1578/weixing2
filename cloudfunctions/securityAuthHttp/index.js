@@ -21,6 +21,11 @@ const REPORT_CLOSE_INPUT_KEYS = new Set([
   'closeReason',
   'actionContent',
 ]);
+const IDENTITY_CREATE_INPUT_KEYS = new Set(['role', 'identityNo', 'name', 'collegeId']);
+const IDENTITY_UNBIND_INPUT_KEYS = new Set(['version']);
+const IDENTITY_STATUS_INPUT_KEYS = new Set(['version', 'status']);
+const MANAGEABLE_IDENTITY_ROLES = new Set(['student', 'counselor']);
+const MANAGEABLE_IDENTITY_STATUSES = new Set(['active', 'suspended']);
 const ALLOWED_REPORT_CLOSE_VERIFICATION_RESULTS = new Set([
   'confirmed',
   'suspected',
@@ -48,6 +53,9 @@ const MAX_ALERT_CONTENT_LENGTH = 1000;
 const MAX_SOURCE_REFERENCE_LENGTH = 128;
 const MAX_ACTION_CONTENT_LENGTH = 1000;
 const MAX_CLOSE_REASON_LENGTH = 1000;
+const MAX_IDENTITY_NO_LENGTH = 64;
+const MAX_IDENTITY_NAME_LENGTH = 64;
+const MAX_COLLEGE_ID_LENGTH = 64;
 
 const ERROR_MESSAGES = {
   INVALID_INPUT: '请求内容无效',
@@ -210,6 +218,37 @@ function parseReportCloseBody(body) {
   } : null;
 }
 
+function parseIdentityCreateBody(body) {
+  const parsed = parseJsonObjectBody(body);
+  if (!parsed || !hasOnlyAllowedKeys(parsed, IDENTITY_CREATE_INPUT_KEYS, IDENTITY_CREATE_INPUT_KEYS) ||
+    typeof parsed.role !== 'string' || !MANAGEABLE_IDENTITY_ROLES.has(parsed.role)) {
+    return null;
+  }
+  const identityNo = normalizeRequiredString(parsed.identityNo, MAX_IDENTITY_NO_LENGTH);
+  const name = normalizeRequiredString(parsed.name, MAX_IDENTITY_NAME_LENGTH);
+  const collegeId = normalizeRequiredString(parsed.collegeId, MAX_COLLEGE_ID_LENGTH);
+  return identityNo && name && collegeId ? { role: parsed.role, identityNo, name, collegeId } : null;
+}
+
+function parseIdentityUnbindBody(body) {
+  const parsed = parseJsonObjectBody(body);
+  if (!parsed || !hasOnlyAllowedKeys(parsed, IDENTITY_UNBIND_INPUT_KEYS, IDENTITY_UNBIND_INPUT_KEYS) ||
+    !Number.isSafeInteger(parsed.version) || parsed.version <= 0) {
+    return null;
+  }
+  return { version: parsed.version };
+}
+
+function parseIdentityStatusBody(body) {
+  const parsed = parseJsonObjectBody(body);
+  if (!parsed || !hasOnlyAllowedKeys(parsed, IDENTITY_STATUS_INPUT_KEYS, IDENTITY_STATUS_INPUT_KEYS) ||
+    !Number.isSafeInteger(parsed.version) || parsed.version <= 0 ||
+    typeof parsed.status !== 'string' || !MANAGEABLE_IDENTITY_STATUSES.has(parsed.status)) {
+    return null;
+  }
+  return { version: parsed.version, status: parsed.status };
+}
+
 function businessError(code) {
   const error = new Error(code);
   error.isBusinessError = true;
@@ -223,6 +262,11 @@ function isTransactionConflict(error) {
     value.includes('transaction conflict') ||
     value.includes('write conflict') ||
     value.includes('database_transaction_conflict');
+}
+
+function isUniqueConstraintConflict(error) {
+  const value = `${error && error.code ? error.code : ''} ${error && error.errCode ? error.errCode : ''} ${error && error.message ? error.message : ''}`.toLowerCase();
+  return value.includes('duplicate') || value.includes('unique') || value.includes('already exists');
 }
 
 function updatedCount(result) {
@@ -667,6 +711,93 @@ function createReportCloseAudit({ reportId, actorId, beforeStatus, requestId, se
     requestId,
     createdAt: serverDate(),
   };
+}
+
+function createIdentityListAudit({ actorId, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'identity.list',
+    resourceType: 'user',
+    resourceId: actorId,
+    result: 'success',
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
+function createIdentityCreateAudit({ userId, actorId, role, collegeId, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'identity.create',
+    resourceType: 'user',
+    resourceId: userId,
+    result: 'success',
+    afterSummary: { role, collegeId, status: 'active', bindStatus: 'unbound' },
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
+function createIdentityUnbindAudit({ userId, actorId, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'identity.unbind',
+    resourceType: 'user',
+    resourceId: userId,
+    result: 'success',
+    beforeSummary: { bindStatus: 'bound' },
+    afterSummary: { bindStatus: 'unbound' },
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
+function createIdentityStatusAudit({ userId, actorId, beforeStatus, afterStatus, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'identity.status_update',
+    resourceType: 'user',
+    resourceId: userId,
+    result: 'success',
+    beforeSummary: { status: beforeStatus },
+    afterSummary: { status: afterStatus },
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
+function maskIdentityNo(value) {
+  if (typeof value !== 'string' || !value) {
+    return '';
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return '';
+  }
+  if (normalized.length <= 2) {
+    return '*'.repeat(normalized.length);
+  }
+  return `${normalized.slice(0, 2)}${'*'.repeat(Math.max(4, normalized.length - 4))}${normalized.slice(-2)}`;
+}
+
+function isManageableIdentity(user) {
+  return Boolean(user) && MANAGEABLE_IDENTITY_ROLES.has(user.role);
+}
+
+function isActiveCollege(college) {
+  return Boolean(college) && college.status === 'active';
 }
 
 function createSecurityAlertService({
@@ -1120,6 +1251,301 @@ function createSecurityReportClosingService({
   return { close };
 }
 
+function createSecurityIdentityManagementService({
+  authService,
+  db,
+  serverDate,
+  createUserId = () => `usr_${crypto.randomUUID().replace(/-/g, '')}`,
+  createAuditId = () => `audit_${crypto.randomUUID().replace(/-/g, '')}`,
+  createRequestId = () => crypto.randomUUID(),
+  logger = console,
+  configured = true,
+} = {}) {
+  const dependenciesReady = configured &&
+    authService && typeof authService.authenticateSecuritySession === 'function' &&
+    db && typeof db.runTransaction === 'function' && typeof db.collection === 'function' &&
+    db.command && typeof db.command.in === 'function' &&
+    typeof serverDate === 'function';
+
+  function internalFailure(requestId, stage, resourceId = null) {
+    safeLog(logger, { requestId, code: 'INTERNAL_ERROR', resourceId, stage });
+    return failure('INTERNAL_ERROR');
+  }
+
+  async function authenticate(authorization, requestId, stage) {
+    try {
+      return await authService.authenticateSecuritySession(authorization);
+    } catch (error) {
+      return { ok: false, result: internalFailure(requestId, stage) };
+    }
+  }
+
+  function toIdentityListItem(user, collegeNames) {
+    const identityNo = user.role === 'student' ? user.studentNo : user.staffNo;
+    return {
+      userId: user._id,
+      role: user.role,
+      name: typeof user.name === 'string' ? user.name : '',
+      collegeId: typeof user.collegeId === 'string' ? user.collegeId : '',
+      collegeName: collegeNames.get(user.collegeId) || '',
+      identityNoMasked: maskIdentityNo(identityNo),
+      bindStatus: user.bindStatus,
+      status: user.status,
+      version: user.version,
+    };
+  }
+
+  async function list(authorization) {
+    const requestId = createRequestId();
+    if (!dependenciesReady) {
+      return internalFailure(requestId, 'securityIdentityListConfiguration');
+    }
+    const authenticated = await authenticate(authorization, requestId, 'securityIdentityListAuthentication');
+    if (!authenticated.ok) {
+      return authenticated.result;
+    }
+
+    let users;
+    let colleges;
+    try {
+      const [usersResult, collegesResult] = await Promise.all([
+        db.collection('users').where({ role: db.command.in([...MANAGEABLE_IDENTITY_ROLES]) }).get(),
+        db.collection('colleges').where({ status: 'active' }).get(),
+      ]);
+      ensureDatabaseResult(usersResult);
+      ensureDatabaseResult(collegesResult);
+      users = Array.isArray(usersResult.data) ? usersResult.data : [];
+      colleges = Array.isArray(collegesResult.data) ? collegesResult.data : [];
+    } catch (error) {
+      return internalFailure(requestId, 'securityIdentityListRead');
+    }
+
+    const activeColleges = colleges
+      .filter((college) => isActiveCollege(college) && typeof college._id === 'string' && college._id && typeof college.name === 'string' && college.name.trim())
+      .map((college) => ({ collegeId: college._id, name: college.name.trim() }));
+    const collegeNames = new Map(activeColleges.map((college) => [college.collegeId, college.name]));
+    const identities = users
+      .filter(isManageableIdentity)
+      .map((user) => toIdentityListItem(user, collegeNames));
+
+    try {
+      ensureSuccessfulInsert(await db.collection('audit_logs').add(createIdentityListAudit({
+        actorId: authenticated.user._id,
+        requestId,
+        serverDate,
+        createAuditId,
+      })));
+    } catch (error) {
+      return internalFailure(requestId, 'securityIdentityListAudit', authenticated.user._id);
+    }
+    return success('IDENTITIES_LOADED', { identities, colleges: activeColleges });
+  }
+
+  async function create(authorization, body) {
+    const requestId = createRequestId();
+    const input = parseIdentityCreateBody(body);
+    if (!input) {
+      return failure('INVALID_INPUT');
+    }
+    if (!dependenciesReady) {
+      return internalFailure(requestId, 'securityIdentityCreateConfiguration');
+    }
+    const authenticated = await authenticate(authorization, requestId, 'securityIdentityCreateAuthentication');
+    if (!authenticated.ok) {
+      return authenticated.result;
+    }
+
+    const userId = createUserId();
+    const auditId = createAuditId();
+    const identityKey = `${input.role}:${input.identityNo}`;
+    try {
+      const identity = await db.runTransaction(async (transaction) => {
+        const college = await findRecordById(transaction, 'colleges', input.collegeId);
+        if (!isActiveCollege(college) || college._id !== input.collegeId) {
+          throw businessError('NOT_FOUND');
+        }
+        const createdUser = {
+          _id: userId,
+          identityKey,
+          wxIdentityKey: `unbound:${userId}`,
+          role: input.role,
+          name: input.name,
+          collegeId: input.collegeId,
+          studentNo: input.role === 'student' ? input.identityNo : null,
+          staffNo: input.role === 'counselor' ? input.identityNo : null,
+          loginName: null,
+          passwordHash: null,
+          wxOpenId: null,
+          bindStatus: 'unbound',
+          mobile: null,
+          focusFlag: false,
+          focusReason: null,
+          status: 'active',
+          version: 1,
+          createdAt: serverDate(),
+          updatedAt: serverDate(),
+        };
+        ensureSuccessfulInsert(await transaction.collection('users').add(createdUser));
+        ensureSuccessfulInsert(await transaction.collection('audit_logs').add(createIdentityCreateAudit({
+          userId,
+          actorId: authenticated.user._id,
+          role: input.role,
+          collegeId: input.collegeId,
+          requestId,
+          serverDate,
+          createAuditId: () => auditId,
+        })));
+        return {
+          userId,
+          role: input.role,
+          collegeId: input.collegeId,
+          bindStatus: 'unbound',
+          status: 'active',
+          version: 1,
+        };
+      });
+      return success('IDENTITY_CREATED', { identity });
+    } catch (error) {
+      if (error && error.isBusinessError) {
+        return failure(error.businessCode);
+      }
+      if (isTransactionConflict(error) || isUniqueConstraintConflict(error)) {
+        return failure('CONFLICT');
+      }
+      return internalFailure(requestId, 'securityIdentityCreateTransaction', userId);
+    }
+  }
+
+  async function unbind(authorization, userId, body) {
+    const requestId = createRequestId();
+    const input = parseIdentityUnbindBody(body);
+    if (!input || typeof userId !== 'string' || !userId) {
+      return failure('INVALID_INPUT');
+    }
+    if (!dependenciesReady) {
+      return internalFailure(requestId, 'securityIdentityUnbindConfiguration', userId || null);
+    }
+    const authenticated = await authenticate(authorization, requestId, 'securityIdentityUnbindAuthentication');
+    if (!authenticated.ok) {
+      return authenticated.result;
+    }
+
+    const auditId = createAuditId();
+    try {
+      const identity = await db.runTransaction(async (transaction) => {
+        const current = await findRecordById(transaction, 'users', userId);
+        if (!current) {
+          throw businessError('NOT_FOUND');
+        }
+        if (!isManageableIdentity(current)) {
+          throw businessError('FORBIDDEN');
+        }
+        if (current.bindStatus !== 'bound' || typeof current.wxOpenId !== 'string' || !current.wxOpenId ||
+          current.wxIdentityKey !== `openid:${current.wxOpenId}` || current.version !== input.version) {
+          throw businessError('CONFLICT');
+        }
+        const nextWxIdentityKey = `unbound:${current._id}`;
+        const updateResult = ensureDatabaseResult(await transaction.collection('users').where({
+          _id: current._id,
+          version: input.version,
+          bindStatus: 'bound',
+          wxIdentityKey: current.wxIdentityKey,
+        }).update({
+          wxOpenId: null,
+          wxIdentityKey: nextWxIdentityKey,
+          bindStatus: 'unbound',
+          version: input.version + 1,
+          updatedAt: serverDate(),
+        }));
+        if (updatedCount(updateResult) !== 1) {
+          throw businessError('CONFLICT');
+        }
+        ensureSuccessfulInsert(await transaction.collection('audit_logs').add(createIdentityUnbindAudit({
+          userId: current._id,
+          actorId: authenticated.user._id,
+          requestId,
+          serverDate,
+          createAuditId: () => auditId,
+        })));
+        return { userId: current._id, bindStatus: 'unbound', version: input.version + 1 };
+      });
+      return success('IDENTITY_UNBOUND', { identity });
+    } catch (error) {
+      if (error && error.isBusinessError) {
+        return failure(error.businessCode);
+      }
+      if (isTransactionConflict(error)) {
+        return failure('CONFLICT');
+      }
+      return internalFailure(requestId, 'securityIdentityUnbindTransaction', userId);
+    }
+  }
+
+  async function updateStatus(authorization, userId, body) {
+    const requestId = createRequestId();
+    const input = parseIdentityStatusBody(body);
+    if (!input || typeof userId !== 'string' || !userId) {
+      return failure('INVALID_INPUT');
+    }
+    if (!dependenciesReady) {
+      return internalFailure(requestId, 'securityIdentityStatusConfiguration', userId || null);
+    }
+    const authenticated = await authenticate(authorization, requestId, 'securityIdentityStatusAuthentication');
+    if (!authenticated.ok) {
+      return authenticated.result;
+    }
+
+    const auditId = createAuditId();
+    try {
+      const identity = await db.runTransaction(async (transaction) => {
+        const current = await findRecordById(transaction, 'users', userId);
+        if (!current) {
+          throw businessError('NOT_FOUND');
+        }
+        if (!isManageableIdentity(current)) {
+          throw businessError('FORBIDDEN');
+        }
+        if (!MANAGEABLE_IDENTITY_STATUSES.has(current.status) || current.version !== input.version || current.status === input.status) {
+          throw businessError('CONFLICT');
+        }
+        const updateResult = ensureDatabaseResult(await transaction.collection('users').where({
+          _id: current._id,
+          version: input.version,
+          status: current.status,
+        }).update({
+          status: input.status,
+          version: input.version + 1,
+          updatedAt: serverDate(),
+        }));
+        if (updatedCount(updateResult) !== 1) {
+          throw businessError('CONFLICT');
+        }
+        ensureSuccessfulInsert(await transaction.collection('audit_logs').add(createIdentityStatusAudit({
+          userId: current._id,
+          actorId: authenticated.user._id,
+          beforeStatus: current.status,
+          afterStatus: input.status,
+          requestId,
+          serverDate,
+          createAuditId: () => auditId,
+        })));
+        return { userId: current._id, status: input.status, version: input.version + 1 };
+      });
+      return success('IDENTITY_STATUS_UPDATED', { identity });
+    } catch (error) {
+      if (error && error.isBusinessError) {
+        return failure(error.businessCode);
+      }
+      if (isTransactionConflict(error)) {
+        return failure('CONFLICT');
+      }
+      return internalFailure(requestId, 'securityIdentityStatusTransaction', userId);
+    }
+  }
+
+  return { list, create, unbind, updateStatus };
+}
+
 function readHeader(headers, name) {
   if (!headers || typeof headers !== 'object') {
     return undefined;
@@ -1217,7 +1643,25 @@ function getReportCloseId(path) {
   return match ? match[1] : null;
 }
 
-function createHttpHandler({ authService, alertService = null, reportProcessingService = null, reportClosingService = null, allowedOrigins, logger = console }) {
+function getIdentityUnbindUserId(path) {
+  const match = /^\/identities\/([^/]+)\/unbind$/.exec(path);
+  return match ? match[1] : null;
+}
+
+function getIdentityStatusUserId(path) {
+  const match = /^\/identities\/([^/]+)\/status$/.exec(path);
+  return match ? match[1] : null;
+}
+
+function createHttpHandler({
+  authService,
+  alertService = null,
+  reportProcessingService = null,
+  reportClosingService = null,
+  identityManagementService = null,
+  allowedOrigins,
+  logger = console,
+}) {
   if (!authService || typeof authService.login !== 'function' || typeof authService.session !== 'function') {
     throw new Error('securityAuthHttp requires an authentication service');
   }
@@ -1227,11 +1671,15 @@ function createHttpHandler({ authService, alertService = null, reportProcessingS
     const method = getHttpMethod(event);
     const path = getHttpPath(event);
     if (method === 'OPTIONS') {
+      const identityUnbindUserId = getIdentityUnbindUserId(path);
+      const identityStatusUserId = getIdentityStatusUserId(path);
       const allowedMethods = path === '/login'
         ? 'POST, OPTIONS'
         : path === '/session'
           ? 'GET, OPTIONS'
-          : (path === '/alerts' || getAlertDispatchId(path) || getReportStartProcessId(path) || getReportCloseId(path))
+          : path === '/identities'
+            ? 'GET, POST, OPTIONS'
+            : (identityUnbindUserId || identityStatusUserId || path === '/alerts' || getAlertDispatchId(path) || getReportStartProcessId(path) || getReportCloseId(path))
             ? 'POST, OPTIONS'
             : null;
       if (!allowedMethods) {
@@ -1250,6 +1698,45 @@ function createHttpHandler({ authService, alertService = null, reportProcessingS
       }
       if (method === 'GET' && path === '/session') {
         return httpResponse(await authService.session(readHeader(event && event.headers, 'authorization')), buildResponseHeaders(origin, originWhitelist));
+      }
+      if (method === 'GET' && path === '/identities') {
+        if (!identityManagementService || typeof identityManagementService.list !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await identityManagementService.list(
+          readHeader(event && event.headers, 'authorization'),
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      if (method === 'POST' && path === '/identities') {
+        if (!identityManagementService || typeof identityManagementService.create !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await identityManagementService.create(
+          readHeader(event && event.headers, 'authorization'),
+          event && event.body,
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      const identityUnbindUserId = getIdentityUnbindUserId(path);
+      if (method === 'POST' && identityUnbindUserId) {
+        if (!identityManagementService || typeof identityManagementService.unbind !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await identityManagementService.unbind(
+          readHeader(event && event.headers, 'authorization'),
+          identityUnbindUserId,
+          event && event.body,
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      const identityStatusUserId = getIdentityStatusUserId(path);
+      if (method === 'POST' && identityStatusUserId) {
+        if (!identityManagementService || typeof identityManagementService.updateStatus !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await identityManagementService.updateStatus(
+          readHeader(event && event.headers, 'authorization'),
+          identityStatusUserId,
+          event && event.body,
+        ), buildResponseHeaders(origin, originWhitelist));
       }
       if (method === 'POST' && path === '/alerts') {
         if (!alertService || typeof alertService.create !== 'function') {
@@ -1376,11 +1863,19 @@ function createDefaultHandler(options = {}) {
       logger,
       configured: dependencies.configured,
     });
+    const identityManagementService = createSecurityIdentityManagementService({
+      authService,
+      db: dependencies.db,
+      serverDate: dependencies.serverDate,
+      logger,
+      configured: dependencies.configured,
+    });
     return createHttpHandler({
       authService,
       alertService,
       reportProcessingService,
       reportClosingService,
+      identityManagementService,
       allowedOrigins: environment.SECURITY_WEB_ALLOWED_ORIGINS,
       logger,
     });
@@ -1454,6 +1949,7 @@ exports.__testables = {
   createDefaultHandler,
   createHttpHandler,
   createSecurityAlertService,
+  createSecurityIdentityManagementService,
   createSecurityReportClosingService,
   createSecurityReportProcessingService,
   calculateManualAlertRisk,
@@ -1461,6 +1957,8 @@ exports.__testables = {
   createReportCloseAudit,
   createReportStartProcessAudit,
   getAlertDispatchId,
+  getIdentityStatusUserId,
+  getIdentityUnbindUserId,
   getReportCloseId,
   getReportStartProcessId,
   createNodeServer,
@@ -1468,9 +1966,13 @@ exports.__testables = {
   normalizeLoginName,
   parseAlertCreateBody,
   parseAlertDispatchBody,
+  parseIdentityCreateBody,
+  parseIdentityStatusBody,
+  parseIdentityUnbindBody,
   parseReportCloseBody,
   parseReportStartProcessBody,
   parseAllowedOrigins,
   parseLoginBody,
+  maskIdentityNo,
   verifySessionToken,
 };
