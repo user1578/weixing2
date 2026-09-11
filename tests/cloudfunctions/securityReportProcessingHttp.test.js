@@ -21,13 +21,6 @@ function clone(value) {
   return structuredClone(value);
 }
 
-function normalizeWrite(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) &&
-    Object.keys(value).length === 1 && Object.hasOwn(value, 'data')
-    ? value.data
-    : value;
-}
-
 function equals(left, right) {
   return left instanceof Date && right instanceof Date ? left.getTime() === right.getTime() : left === right;
 }
@@ -101,7 +94,7 @@ function createMockDb({ users = [], reports = [], options = {} } = {}) {
             if (!inTransaction && options.rejectDirectBusinessWrites) {
               throw new Error('Business writes must use a transaction handle');
             }
-            const data = normalizeWrite(rawData);
+            const data = rawData;
             state.conditionalUpdates.push({ collection: name, condition: clone(condition), data: clone(data), inTransaction });
             state.writes.push({ collection: name, operation: 'where.update', inTransaction, data: clone(data) });
             if (name === 'fraud_reports' && typeof options.beforeReportConditionalUpdate === 'function') {
@@ -304,6 +297,7 @@ test('1. 成功迁移只更新 report 一次，并新增一条 disposition 和�
   });
   assert.deepEqual([updated.status, updated.version, updated.currentHandlerId], ['in_process', 4, 'usr_security_001']);
   assert.equal(updated.updatedAt.$serverDate > 0, true);
+  assert.equal(Object.hasOwn(updated, 'data'), false);
   for (const key of ['studentId', 'collegeId', 'sourceAlertId', 'sourceAlertKey', 'fraudType', 'incidentAt', 'involvedAmount',
     'hasLoss', 'incidentNarrative', 'suspiciousPlatform', 'suspiciousAccount', 'contactPhone', 'studentRemark', 'riskLevel',
     'riskReasons', 'riskRuleId', 'confirmedLossAmount', 'finalOutcome', 'closeReason', 'closedAt', 'submittedAt', 'createdAt']) {
@@ -345,11 +339,18 @@ test('1. 成功迁移只更新 report 一次，并新增一条 disposition 和�
     ['security_dispositions', 'add', true],
     ['audit_logs', 'add', true],
   ]);
-  assert.deepEqual(fixture.state.conditionalUpdates[0].condition, {
+  const conditionalUpdate = fixture.state.conditionalUpdates[0];
+  assert.deepEqual(conditionalUpdate.condition, {
     _id: 'report_001',
     status: 'pending_security_verify',
     version: 3,
   });
+  assert.deepEqual(Object.keys(conditionalUpdate.data).sort(), ['currentHandlerId', 'status', 'updatedAt', 'version']);
+  assert.equal(conditionalUpdate.data.status, 'in_process');
+  assert.equal(conditionalUpdate.data.currentHandlerId, 'usr_security_001');
+  assert.equal(conditionalUpdate.data.updatedAt.$serverDate > 0, true);
+  assert.equal(conditionalUpdate.data.version, 4);
+  assert.equal(Object.hasOwn(conditionalUpdate.data, 'data'), false);
   assert.equal(fixture.state.followups.length, 0);
 });
 

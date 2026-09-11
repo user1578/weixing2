@@ -893,12 +893,10 @@ function createSecurityReportProcessingService({
           status: 'pending_security_verify',
           version: input.version,
         }).update({
-          data: {
-            status: 'in_process',
-            currentHandlerId: authenticated.user._id,
-            updatedAt: serverDate(),
-            version: input.version + 1,
-          },
+          status: 'in_process',
+          currentHandlerId: authenticated.user._id,
+          updatedAt: serverDate(),
+          version: input.version + 1,
         }));
         if (updatedCount(updateResult) !== 1) {
           throw businessError('CONFLICT');
