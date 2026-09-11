@@ -1,0 +1,131 @@
+page {
+  min-height: 100%;
+  background: #f5f8fc;
+}
+
+.page {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 36rpx 24rpx calc(60rpx + env(safe-area-inset-bottom));
+}
+
+.page_header {
+  margin: 4rpx 6rpx 28rpx;
+}
+
+.page_title {
+  color: #17233d;
+  font-size: 42rpx;
+  font-weight: 700;
+}
+
+.page_subtitle {
+  margin-top: 10rpx;
+  color: #718197;
+  font-size: 25rpx;
+  line-height: 1.55;
+}
+
+.state_card,
+.report_card {
+  box-sizing: border-box;
+  border: 1rpx solid #e1e9f4;
+  border-radius: 18rpx;
+  background: #ffffff;
+  box-shadow: 0 6rpx 18rpx rgba(30, 41, 59, 0.055);
+}
+
+.state_card {
+  padding: 48rpx 28rpx;
+  color: #64748b;
+  font-size: 28rpx;
+  text-align: center;
+}
+
+.error_state {
+  color: #b91c1c;
+}
+
+.retry_button {
+  width: 230rpx;
+  margin-top: 28rpx;
+  border-radius: 999rpx;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 28rpx;
+}
+
+.report_card {
+  margin-bottom: 18rpx;
+  padding: 26rpx;
+}
+
+.report_top,
+.report_bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.fraud_type {
+  min-width: 0;
+  overflow: hidden;
+  color: #1e293b;
+  font-size: 30rpx;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.risk_tag,
+.status_tag {
+  flex: none;
+  margin-left: 18rpx;
+  padding: 5rpx 14rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+}
+
+.risk-low {
+  background: #eaf8ef;
+  color: #16804d;
+}
+
+.risk-medium {
+  background: #fff4dc;
+  color: #b45309;
+}
+
+.risk-high {
+  background: #fff1f2;
+  color: #dc2626;
+}
+
+.risk-unknown {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.report_bottom {
+  margin-top: 24rpx;
+  padding-top: 20rpx;
+  border-top: 1rpx solid #edf2f7;
+}
+
+.status_tag {
+  margin-left: 0;
+  background: #eaf2ff;
+  color: #2563eb;
+}
+
+.report_hint {
+  min-width: 0;
+  margin-left: 18rpx;
+  overflow: hidden;
+  color: #8a9ab0;
+  font-size: 21rpx;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

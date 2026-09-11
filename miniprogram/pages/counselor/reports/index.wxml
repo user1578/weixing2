@@ -1,0 +1,28 @@
+<view class="page">
+  <view class="page_header">
+    <view class="page_title">待核验工单</view>
+    <view class="page_subtitle">仅展示当前学院、当前权限范围内的待办</view>
+  </view>
+
+  <view class="state_card" wx:if="{{loading}}">正在加载工单…</view>
+
+  <view class="state_card error_state" wx:elif="{{errorMessage}}">
+    <view>{{errorMessage}}</view>
+    <button class="retry_button" bindtap="loadReports">重新加载</button>
+  </view>
+
+  <view class="state_card" wx:elif="{{loaded && reports.length === 0}}">当前没有待核验工单</view>
+
+  <view class="report_list" wx:elif="{{reports.length}}">
+    <view class="report_card" wx:for="{{reports}}" wx:key="reportId">
+      <view class="report_top">
+        <view class="fraud_type">{{item.fraudTypeText}}</view>
+        <view class="risk_tag {{item.riskClass}}">{{item.riskText}}</view>
+      </view>
+      <view class="report_bottom">
+        <view class="status_tag">{{item.statusText}}</view>
+        <view class="report_hint">请进入既有工单流程继续处理</view>
+      </view>
+    </view>
+  </view>
+</view>

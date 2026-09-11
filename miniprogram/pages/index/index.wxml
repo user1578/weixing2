@@ -1,52 +1,162 @@
-<view class="container">
-  <view class="title">身份联调测试</view>
-  <view class="top_tip">仅用于当前开发阶段，后续会替换为正式页面</view>
-
-  <view class="identity_test">
-    <view class="section_title">小程序身份状态</view>
-    <button class="primary_button" bindtap="checkIdentityStatus" loading="{{sessionLoading}}" disabled="{{sessionLoading || bindLoading}}">检查身份状态</button>
-    <view class="status_result" wx:if="{{sessionCode}}">
-      <view>状态码：{{sessionCode}}</view>
-      <view>{{message}}</view>
-    </view>
-    <view class="profile" wx:if="{{sessionCode === 'BOUND' && profile}}">
-      <view class="profile_title">最小 profile</view>
-      <view>userId：{{profile.userId}}</view>
-      <view>role：{{profile.role}}</view>
-      <view>name：{{profile.name}}</view>
-      <view>collegeId：{{profile.collegeId}}</view>
-      <view>focusFlag：{{profile.focusFlag}}</view>
-      <view class="student_alert_entry" wx:if="{{profile.role === 'student'}}">
-        <view class="student_alert_hint">学生服务</view>
-        <button class="primary_button" bindtap="goToStudentAlerts">查看我的预警</button>
-        <button class="primary_button student_report_button" bindtap="goToStudentReport">一键上报</button>
-      </view>
-    </view>
-    <view class="bind_form" wx:if="{{sessionCode === 'UNBOUND'}}">
-      <view class="form_title">绑定演示身份</view>
-      <view class="field_label">角色</view>
-      <picker mode="selector" range="{{roleOptions}}" value="{{roleIndex}}" bindchange="onRoleChange"><view class="field_value">{{role}}</view></picker>
-      <view class="field_label">身份编号</view>
-      <input class="field_input" value="{{identityNo}}" placeholder="学生填 studentNo；辅导员填 staffNo" bindinput="onIdentityNoInput" />
-      <view class="field_label">姓名</view>
-      <input class="field_input" value="{{name}}" placeholder="输入演示身份姓名" bindinput="onNameInput" />
-      <button class="primary_button bind_button" bindtap="bindIdentity" loading="{{bindLoading}}" disabled="{{bindLoading || sessionLoading}}">绑定演示身份</button>
-      <view class="bind_result" wx:if="{{bindCode}}">绑定结果：{{bindCode}}</view>
-    </view>
+<view class="page">
+  <view class="brand_bar">
+    <view class="brand_mark">校园反诈</view>
+    <view class="brand_hint">安全工作台</view>
   </view>
 
-  <view class="ping_test">
-    <view class="section_title">CloudBase 联通测试</view>
-    <button class="ping_test_button" bindtap="testCloudbaseConnection">测试CloudBase连接</button>
-    <view class="ping_result" wx:if="{{pingResult}}">
-      <view>ok：{{pingResult.ok}}</view>
-      <view>message：{{pingResult.message}}</view>
-      <view>envId：{{pingResult.envId}}</view>
+  <view class="state_card" wx:if="{{sessionLoading && !profile}}">正在加载身份信息…</view>
+
+  <view wx:elif="{{profile}}">
+    <view class="identity_card">
+      <view class="identity_main">
+        <view class="identity_copy">
+          <view class="identity_name">{{profile.name}}</view>
+          <view class="identity_meta">学院：{{profile.collegeId}}</view>
+        </view>
+        <view class="identity_tag">{{profile.roleText}}</view>
+      </view>
+      <view class="identity_bottom">
+        <view>当前身份已通过小程序会话确认</view>
+        <button class="switch_button" wx:if="{{demoSwitchAvailable}}" bindtap="openSwitchSheet" disabled="{{identitySwitchLoading}}">切换身份</button>
+      </view>
     </view>
-    <view class="ping_error" wx:if="{{pingError}}">
-      <view>调用失败</view>
-      <view>errCode：{{pingError.errCode}}</view>
-      <view>errMsg：{{pingError.errMsg}}</view>
+
+    <view class="workbench_notice" wx:if="{{workbenchNotice}}">{{workbenchNotice}}</view>
+
+    <block wx:if="{{profile.role === 'student'}}">
+      <view class="hello_block">
+        <view class="hello_title">你好，{{profile.name}}</view>
+        <view class="hello_subtitle">{{profile.focusFlag ? '请优先关注近期风险提醒' : '保持警惕，守护校园安全'}}</view>
+      </view>
+
+      <view class="risk_overview">
+        <view class="section_kicker">当前风险提醒</view>
+        <view class="overview_head">
+          <view class="overview_title">及时查看，及时上报</view>
+          <view class="overview_loading" wx:if="{{workbenchLoading}}">刷新中</view>
+        </view>
+        <view class="metric_grid">
+          <view class="metric urgent_metric">
+            <view class="metric_value">{{studentSummary.highRiskCount}}</view>
+            <view class="metric_label">高风险提醒</view>
+          </view>
+          <view class="metric">
+            <view class="metric_value">{{studentSummary.pendingAlertCount}}</view>
+            <view class="metric_label">待查看提醒</view>
+          </view>
+          <view class="metric wide_metric">
+            <view class="metric_value">{{studentSummary.reportCountText}}</view>
+            <view class="metric_label">正在处理工单</view>
+            <view class="metric_hint">{{studentSummary.reportHint}}</view>
+          </view>
+        </view>
+      </view>
+
+      <view class="section_head">
+        <view class="section_title">常用服务</view>
+        <view class="section_note">学生安全服务</view>
+      </view>
+      <view class="feature_grid">
+        <button class="feature_card blue_feature" bindtap="goToStudentAlerts">
+          <view class="feature_top"><view class="feature_icon">提醒</view><view class="feature_badge" wx:if="{{studentSummary.pendingAlertCount}}">{{studentSummary.pendingAlertCount}}</view></view>
+          <view class="feature_title">风险提醒</view>
+          <view class="feature_text">查看需要关注的安全提醒</view>
+        </button>
+        <button class="feature_card primary_feature" bindtap="goToStudentReport">
+          <view class="feature_top"><view class="feature_icon">上报</view></view>
+          <view class="feature_title">我要上报</view>
+          <view class="feature_text">提交线索，获取后续协助</view>
+        </button>
+        <button class="feature_card" bindtap="showUnavailable">
+          <view class="feature_top"><view class="feature_icon">工单</view><view class="feature_status">{{studentStatusPreview}}</view></view>
+          <view class="feature_title">我的工单</view>
+          <view class="feature_text">现有服务暂未提供工单列表入口</view>
+        </button>
+        <button class="feature_card" bindtap="showUnavailable">
+          <view class="feature_top"><view class="feature_icon">学习</view></view>
+          <view class="feature_title">安全学习</view>
+          <view class="feature_text">持续学习常见诈骗防范知识</view>
+        </button>
+      </view>
+    </block>
+
+    <block wx:elif="{{profile.role === 'counselor'}}">
+      <view class="hello_block">
+        <view class="hello_title">辅导员工单台</view>
+        <view class="hello_subtitle">学院：{{profile.collegeId}} · 重点待办优先处理</view>
+      </view>
+
+      <view class="counselor_overview">
+        <view class="section_kicker">当前待办摘要</view>
+        <view class="overview_head">
+          <view class="overview_title">学院工单工作台</view>
+          <view class="overview_loading" wx:if="{{workbenchLoading}}">刷新中</view>
+        </view>
+        <view class="metric_grid counselor_metrics">
+          <view class="metric">
+            <view class="metric_value">{{counselorSummary.pendingVerifyCount}}</view>
+            <view class="metric_label">待核验</view>
+          </view>
+          <view class="metric urgent_metric">
+            <view class="metric_value">{{counselorSummary.highRiskCount}}</view>
+            <view class="metric_label">高风险待办</view>
+          </view>
+          <view class="metric wide_metric">
+            <view class="metric_value">{{counselorSummary.followingCountText}}</view>
+            <view class="metric_label">跟进处理中</view>
+            <view class="metric_hint">{{counselorSummary.unavailableHint}}</view>
+          </view>
+        </view>
+      </view>
+
+      <view class="section_head">
+        <view class="section_title">工单入口</view>
+        <view class="section_note">按权限加载学院数据</view>
+      </view>
+      <view class="feature_grid">
+        <button class="feature_card primary_feature" bindtap="goToCounselorReports">
+          <view class="feature_top"><view class="feature_icon">核验</view><view class="feature_badge" wx:if="{{counselorSummary.pendingVerifyCount}}">{{counselorSummary.pendingVerifyCount}}</view></view>
+          <view class="feature_title">待核验工单</view>
+          <view class="feature_text">查看当前学院待处理工单</view>
+        </button>
+        <button class="feature_card" bindtap="showUnavailable">
+          <view class="feature_top"><view class="feature_icon">跟进</view><view class="feature_status">{{counselorProgressStatus}}</view></view>
+          <view class="feature_title">跟进处理中</view>
+          <view class="feature_text">现有数据入口后续接入</view>
+        </button>
+        <button class="feature_card urgent_feature" bindtap="goToCounselorReports">
+          <view class="feature_top"><view class="feature_icon">重点</view><view class="feature_badge risk_badge" wx:if="{{counselorSummary.highRiskCount}}">{{counselorSummary.highRiskCount}}</view></view>
+          <view class="feature_title">重点关注</view>
+          <view class="feature_text">优先查看高风险待核验事项</view>
+        </button>
+        <button class="feature_card" bindtap="showUnavailable">
+          <view class="feature_top"><view class="feature_icon">记录</view><view class="feature_status">{{counselorSummary.recordCountText}}</view></view>
+          <view class="feature_title">工单记录</view>
+          <view class="feature_text">已转交与历史记录后续聚合</view>
+        </button>
+      </view>
+    </block>
+  </view>
+
+  <view class="state_card" wx:elif="{{sessionCode === 'UNBOUND'}}">
+    <view>当前微信尚未绑定工作台身份。</view>
+    <view class="unbound_hint">请使用管理员已配置的学生或辅导员演示身份进入。</view>
+    <button class="retry_button" bindtap="refreshSession" disabled="{{sessionLoading}}">重新检查身份</button>
+  </view>
+
+  <view class="state_card error_state" wx:else>
+    <view>{{message || '身份状态暂时不可用。'}}</view>
+    <button class="retry_button" bindtap="refreshSession" disabled="{{sessionLoading}}">重新加载</button>
+  </view>
+
+  <view class="sheet_mask" wx:if="{{switchSheetVisible}}" bindtap="closeSwitchSheet">
+    <view class="switch_sheet" catchtap="preventTap">
+      <view class="sheet_handle"></view>
+      <view class="sheet_title">切换演示身份</view>
+      <view class="sheet_hint">切换后将重新验证小程序会话</view>
+      <button class="sheet_option" data-target-role="student" bindtap="switchDemoIdentity" disabled="{{identitySwitchLoading || profile.role === 'student'}}">学生身份<text wx:if="{{profile.role === 'student'}}">（当前）</text></button>
+      <button class="sheet_option" data-target-role="counselor" bindtap="switchDemoIdentity" disabled="{{identitySwitchLoading || profile.role === 'counselor'}}">辅导员身份<text wx:if="{{profile.role === 'counselor'}}">（当前）</text></button>
+      <button class="sheet_cancel" bindtap="closeSwitchSheet" disabled="{{identitySwitchLoading}}">取消</button>
     </view>
   </view>
 </view>

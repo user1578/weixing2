@@ -3,7 +3,8 @@
     "pages/index/index",
     "pages/alerts/index/index",
     "pages/alerts/detail/index",
-    "pages/reports/create/index"
+    "pages/reports/create/index",
+    "pages/counselor/reports/index"
   ],
   "window": {
     "backgroundColor": "#F6F6F6",
