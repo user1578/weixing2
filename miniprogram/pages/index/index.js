@@ -26,6 +26,12 @@ const DEMO_IDENTITIES = Object.freeze({
   counselor: Object.freeze({ userId: "usr_counselor_demo_001", collegeId: "college_cs" }),
 });
 
+// UI-only labels from the reviewed demo colleges seed. Authorization always uses the
+// server-resolved collegeId and never this display mapping.
+const DEMO_COLLEGE_DISPLAY_NAMES = Object.freeze({
+  college_cs: "计算机学院",
+});
+
 const REPORT_STATUS_LABELS = Object.freeze({
   pending_counselor_verify: "待辅导员核实",
   pending_security_verify: "待保卫处核验",
@@ -50,12 +56,17 @@ function normalizeProfile(profile = {}) {
     typeof profile.name !== "string" || !profile.name.trim()) {
     return null;
   }
+  const collegeId = typeof profile.collegeId === "string" && profile.collegeId.trim() ? profile.collegeId.trim() : "";
+  const collegeName = typeof profile.collegeName === "string" && profile.collegeName.trim()
+    ? profile.collegeName.trim()
+    : (DEMO_COLLEGE_DISPLAY_NAMES[collegeId] || "");
   return {
     userId: profile.userId,
     role: profile.role,
     roleText: ROLE_LABELS[profile.role],
     name: profile.name.trim(),
-    collegeId: typeof profile.collegeId === "string" && profile.collegeId.trim() ? profile.collegeId.trim() : "暂未填写",
+    collegeId,
+    collegeName,
     focusFlag: profile.focusFlag === true,
   };
 }
@@ -326,6 +337,7 @@ if (typeof module !== "undefined") {
       isDemoIdentityCandidate,
       isSwitchTarget,
       normalizeProfile,
+      DEMO_COLLEGE_DISPLAY_NAMES,
       pageDefinition,
       sameProfile,
       statusTextForCounselor,

@@ -306,3 +306,42 @@ test('14. 身份切换后的强制刷新会等待进行中的刷新，再重新�
   assert.equal(await forcedRefresh, true);
   assert.equal(refreshCount, 2);
 });
+
+test('15. 学院名称仅用于工作台展示，保留可信 collegeId 供现有权限链路使用', () => {
+  const mapped = workbench.normalizeProfile(COUNSELOR);
+  const trustedName = workbench.normalizeProfile({ ...COUNSELOR, collegeName: '可信返回的学院名称' });
+  const unknown = workbench.normalizeProfile({ ...COUNSELOR, collegeId: 'college_other' });
+  const wxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxml'), 'utf8');
+
+  assert.equal(mapped.collegeId, 'college_cs');
+  assert.equal(mapped.collegeName, '计算机学院');
+  assert.equal(trustedName.collegeName, '可信返回的学院名称');
+  assert.equal(unknown.collegeName, '');
+  assert.match(wxml, /所属学院/);
+  assert.match(wxml, /profile\.collegeName/);
+  assert.equal(wxml.includes('profile.collegeId'), false);
+});
+
+test('16. 辅导员工单入口采用浅蓝待办、白底常规、浅红重点的固定 2×2 卡片布局', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxss'), 'utf8');
+  const counselorCss = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/counselor/reports/index.wxss'), 'utf8');
+  const wxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxml'), 'utf8');
+  const pendingBlock = css.match(/\.counselor_pending_feature\s*\{([\s\S]*?)\n\}/)[1];
+  const focusBlock = css.match(/\.counselor_focus_feature\s*\{([\s\S]*?)\n\}/)[1];
+  const primaryBlock = css.match(/\.primary_feature\s*\{([\s\S]*?)\n\}/)[1];
+
+  assert.match(wxml, /feature_grid counselor_feature_grid/);
+  assert.equal((wxml.match(/feature_card counselor_card/g) || []).length, 4);
+  assert.match(css, /\.counselor_card\s*\{[\s\S]*width:\s*48\.5%/);
+  assert.match(css, /\.counselor_card\s*\{[\s\S]*min-height:\s*214rpx/);
+  assert.match(pendingBlock, /background:\s*#eaf2ff/i);
+  assert.match(pendingBlock, /border-color:\s*#cfe0ff/i);
+  assert.doesNotMatch(pendingBlock, /#2563eb/i);
+  assert.match(focusBlock, /background:\s*#fff7f8/i);
+  assert.match(focusBlock, /border-color:\s*#fecdd3/i);
+  assert.match(primaryBlock, /background:\s*#eaf2ff/i);
+  assert.doesNotMatch(css, /(^|\n)page\s*\{/);
+  assert.doesNotMatch(counselorCss, /(^|\n)page\s*\{/);
+  assert.doesNotMatch(css, /\[[^\]]+\]/);
+  assert.doesNotMatch(counselorCss, /\[[^\]]+\]/);
+});

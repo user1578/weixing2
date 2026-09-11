@@ -1,12 +1,8 @@
-page {
-  min-height: 100%;
-  background: #f5f8fc;
-}
-
 .page {
   box-sizing: border-box;
-  min-height: 100%;
+  min-height: 100vh;
   padding: 28rpx 24rpx calc(64rpx + env(safe-area-inset-bottom));
+  background: #f5f8fc;
   color: #17233d;
 }
 
@@ -225,6 +221,12 @@ page {
   justify-content: space-between;
 }
 
+.counselor_feature_grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
 .feature_card {
   box-sizing: border-box;
   width: 48.5%;
@@ -241,20 +243,33 @@ page {
 }
 
 .blue_feature {
-  border-color: #d6e6ff;
-  background: #fbfdff;
+  border-color: #cfe0ff;
+  background: #f5f9ff;
 }
 
 .primary_feature {
-  border-color: #2563eb;
-  background: #2563eb;
-  color: #ffffff;
-  box-shadow: 0 10rpx 22rpx rgba(37, 99, 235, 0.2);
+  border-color: #cfe0ff;
+  background: #eaf2ff;
+  color: #1e3a8a;
+  box-shadow: 0 8rpx 20rpx rgba(37, 99, 235, 0.1);
 }
 
-.urgent_feature {
-  border-color: #fecaca;
-  background: #fffafa;
+.counselor_card {
+  width: 48.5%;
+  min-height: 214rpx;
+}
+
+.counselor_pending_feature {
+  border-color: #cfe0ff;
+  background: #eaf2ff;
+  color: #1e3a8a;
+  box-shadow: 0 8rpx 20rpx rgba(37, 99, 235, 0.1);
+}
+
+.counselor_focus_feature {
+  border-color: #fecdd3;
+  background: #fff7f8;
+  color: #881337;
 }
 
 .feature_icon {
@@ -267,8 +282,13 @@ page {
 }
 
 .primary_feature .feature_icon {
-  background: rgba(255, 255, 255, 0.17);
-  color: #ffffff;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.counselor_focus_feature .feature_icon {
+  background: #ffe4e6;
+  color: #be123c;
 }
 
 .feature_badge,
@@ -286,8 +306,8 @@ page {
 }
 
 .primary_feature .feature_badge {
-  background: #ffffff;
-  color: #2563eb;
+  background: #f7fbff;
+  color: #1d4ed8;
 }
 
 .risk_badge {
@@ -296,7 +316,7 @@ page {
 }
 
 .feature_title {
-  margin-top: 32rpx;
+  margin-top: 26rpx;
   overflow: hidden;
   color: inherit;
   font-size: 29rpx;
@@ -317,7 +337,11 @@ page {
 }
 
 .primary_feature .feature_text {
-  color: rgba(255, 255, 255, 0.78);
+  color: #42638d;
+}
+
+.counselor_focus_feature .feature_text {
+  color: #9f4b5e;
 }
 
 .state_card {
@@ -415,7 +439,7 @@ page {
   color: #1e3a8a;
 }
 
-.sheet_option[disabled] {
+.sheet_option_disabled {
   background: #f1f5f9;
   color: #94a3b8;
 }

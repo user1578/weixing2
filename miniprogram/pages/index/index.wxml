@@ -11,7 +11,7 @@
       <view class="identity_main">
         <view class="identity_copy">
           <view class="identity_name">{{profile.name}}</view>
-          <view class="identity_meta">学院：{{profile.collegeId}}</view>
+          <view class="identity_meta">所属学院<text wx:if="{{profile.collegeName}}">：{{profile.collegeName}}</text></view>
         </view>
         <view class="identity_tag">{{profile.roleText}}</view>
       </view>
@@ -83,7 +83,7 @@
     <block wx:elif="{{profile.role === 'counselor'}}">
       <view class="hello_block">
         <view class="hello_title">辅导员工单台</view>
-        <view class="hello_subtitle">学院：{{profile.collegeId}} · 重点待办优先处理</view>
+        <view class="hello_subtitle">所属学院<text wx:if="{{profile.collegeName}}">：{{profile.collegeName}}</text> · 重点待办优先处理</view>
       </view>
 
       <view class="counselor_overview">
@@ -113,26 +113,26 @@
         <view class="section_title">工单入口</view>
         <view class="section_note">按权限加载学院数据</view>
       </view>
-      <view class="feature_grid">
-        <button class="feature_card primary_feature" bindtap="goToCounselorReports">
-          <view class="feature_top"><view class="feature_icon">核验</view><view class="feature_badge" wx:if="{{counselorSummary.pendingVerifyCount}}">{{counselorSummary.pendingVerifyCount}}</view></view>
+      <view class="feature_grid counselor_feature_grid">
+        <button class="feature_card counselor_card counselor_pending_feature" bindtap="goToCounselorReports">
+          <view class="feature_top"><view class="feature_icon">待办</view></view>
           <view class="feature_title">待核验工单</view>
-          <view class="feature_text">查看当前学院待处理工单</view>
+          <view class="feature_text">当前 {{counselorSummary.pendingVerifyCount}} 项待处理工单</view>
         </button>
-        <button class="feature_card" bindtap="showUnavailable">
-          <view class="feature_top"><view class="feature_icon">跟进</view><view class="feature_status">{{counselorProgressStatus}}</view></view>
+        <button class="feature_card counselor_card" bindtap="showUnavailable">
+          <view class="feature_top"><view class="feature_icon">处理中</view></view>
           <view class="feature_title">跟进处理中</view>
-          <view class="feature_text">现有数据入口后续接入</view>
+          <view class="feature_text">现有聚合数据暂未提供</view>
         </button>
-        <button class="feature_card urgent_feature" bindtap="goToCounselorReports">
-          <view class="feature_top"><view class="feature_icon">重点</view><view class="feature_badge risk_badge" wx:if="{{counselorSummary.highRiskCount}}">{{counselorSummary.highRiskCount}}</view></view>
+        <button class="feature_card counselor_card counselor_focus_feature" bindtap="goToCounselorReports">
+          <view class="feature_top"><view class="feature_icon">重点关注</view></view>
           <view class="feature_title">重点关注</view>
-          <view class="feature_text">优先查看高风险待核验事项</view>
+          <view class="feature_text">高风险 {{counselorSummary.highRiskCount}} 项优先核验</view>
         </button>
-        <button class="feature_card" bindtap="showUnavailable">
-          <view class="feature_top"><view class="feature_icon">记录</view><view class="feature_status">{{counselorSummary.recordCountText}}</view></view>
+        <button class="feature_card counselor_card" bindtap="showUnavailable">
+          <view class="feature_top"><view class="feature_icon">记录</view></view>
           <view class="feature_title">工单记录</view>
-          <view class="feature_text">已转交与历史记录后续聚合</view>
+          <view class="feature_text">已转交与历史记录暂未聚合</view>
         </button>
       </view>
     </block>
@@ -154,8 +154,8 @@
       <view class="sheet_handle"></view>
       <view class="sheet_title">切换演示身份</view>
       <view class="sheet_hint">切换后将重新验证小程序会话</view>
-      <button class="sheet_option" data-target-role="student" bindtap="switchDemoIdentity" disabled="{{identitySwitchLoading || profile.role === 'student'}}">学生身份<text wx:if="{{profile.role === 'student'}}">（当前）</text></button>
-      <button class="sheet_option" data-target-role="counselor" bindtap="switchDemoIdentity" disabled="{{identitySwitchLoading || profile.role === 'counselor'}}">辅导员身份<text wx:if="{{profile.role === 'counselor'}}">（当前）</text></button>
+      <button class="sheet_option {{identitySwitchLoading || profile.role === 'student' ? 'sheet_option_disabled' : ''}}" data-target-role="student" bindtap="switchDemoIdentity" disabled="{{identitySwitchLoading || profile.role === 'student'}}">学生身份<text wx:if="{{profile.role === 'student'}}">（当前）</text></button>
+      <button class="sheet_option {{identitySwitchLoading || profile.role === 'counselor' ? 'sheet_option_disabled' : ''}}" data-target-role="counselor" bindtap="switchDemoIdentity" disabled="{{identitySwitchLoading || profile.role === 'counselor'}}">辅导员身份<text wx:if="{{profile.role === 'counselor'}}">（当前）</text></button>
       <button class="sheet_cancel" bindtap="closeSwitchSheet" disabled="{{identitySwitchLoading}}">取消</button>
     </view>
   </view>
