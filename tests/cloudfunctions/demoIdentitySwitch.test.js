@@ -1,10 +1,62 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 const switchModule = require('../../cloudfunctions/switchDemoMiniProgramIdentity/index.js');
 
 const trustedContext = { OPENID: 'demo-trusted-openid', APPID: 'wxe262970211858262' };
+
+const DISABLED_RESPONSE = Object.freeze({
+  ok: false,
+  code: 'SWITCH_DISABLED',
+  message: '身份切换功能已停用',
+});
+
+test('0. 真实 main 对空输入固定 fail closed，且不触发历史数据库路径', async () => {
+  assert.deepEqual(await switchModule.main(), DISABLED_RESPONSE);
+  const source = fs.readFileSync(path.join(__dirname, '../../cloudfunctions/switchDemoMiniProgramIdentity/index.js'), 'utf8');
+  const mainAssignment = source.match(/exports\.main\s*=\s*createDisabledHandler\(\);/);
+  assert.ok(mainAssignment);
+  assert.equal(mainAssignment[0].includes('createDefaultHandler'), false);
+});
+
+test('0. 真实 main 传 student 仍固定拒绝', async () => {
+  assert.deepEqual(await switchModule.main({ targetRole: 'student' }), DISABLED_RESPONSE);
+});
+
+test('0. 真实 main 传 counselor 仍固定拒绝', async () => {
+  assert.deepEqual(await switchModule.main({ targetRole: 'counselor' }), DISABLED_RESPONSE);
+});
+
+test('0. 真实 main 忽略伪造身份字段且不读取输入', async () => {
+  const poisonedEvent = new Proxy({ userId: 'usr_attacker', role: 'security', openid: 'spoofed-openid' }, {
+    get() { throw new Error('disabled main must not read event fields'); },
+    ownKeys() { throw new Error('disabled main must not enumerate event fields'); },
+  });
+  assert.deepEqual(await switchModule.main(poisonedEvent), DISABLED_RESPONSE);
+});
+
+test('0. 小程序全目录不保留 switch 云函数调用、targetRole 或身份切换入口', () => {
+  const miniProgramRoot = path.join(__dirname, '../../miniprogram');
+  const sourceFiles = [];
+  const collect = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) collect(entryPath);
+      else if (/\.(?:js|json|wxml|wxss)$/.test(entry.name)) sourceFiles.push(entryPath);
+    }
+  };
+  collect(miniProgramRoot);
+  for (const file of sourceFiles) {
+    const source = fs.readFileSync(file, 'utf8');
+    assert.equal(source.includes('switchDemoMiniProgramIdentity'), false, file);
+    assert.equal(source.includes('targetRole'), false, file);
+    assert.equal(source.includes('切换身份'), false, file);
+    assert.equal(source.includes('切换演示身份'), false, file);
+  }
+});
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);

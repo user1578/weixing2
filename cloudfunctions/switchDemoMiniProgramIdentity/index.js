@@ -324,7 +324,15 @@ function createDefaultHandler(cloud = require('wx-server-sdk')) {
   });
 }
 
-exports.main = async (event) => createDefaultHandler()(event);
+function createDisabledHandler() {
+  return async function switchDemoMiniProgramIdentityDisabled() {
+    return failure('SWITCH_DISABLED', '身份切换功能已停用');
+  };
+}
+
+// The historical demo implementation remains below testable helpers only. The deployed
+// entry point intentionally has no CloudBase dependency or identity side effect.
+exports.main = createDisabledHandler();
 exports.__testables = {
   ACCEPTED_EVENT_KEYS,
   DEMO_COLLEGE_ID,
@@ -336,6 +344,7 @@ exports.__testables = {
   TARGET_ID_BY_ROLE,
   actorCollegeId,
   createDefaultHandler,
+  createDisabledHandler,
   createFailureAuditLog,
   createHandler,
   createSwitchAuditLog,
