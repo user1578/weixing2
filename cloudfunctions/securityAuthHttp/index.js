@@ -12,6 +12,7 @@ const TOKEN_CLAIM_KEYS = ['exp', 'iat', 'jti', 'role', 'sub'];
 const ALERT_CREATE_INPUT_KEYS = new Set(['studentNo', 'fraudType', 'content', 'sourceReference']);
 const ALERT_CREATE_REQUIRED_INPUT_KEYS = new Set(['studentNo', 'fraudType', 'content']);
 const ALERT_DISPATCH_INPUT_KEYS = new Set(['version']);
+const REPORT_START_PROCESS_INPUT_KEYS = new Set(['version', 'actionContent']);
 const ALLOWED_FRAUD_TYPES = new Set([
   'part_time_scam',
   'impersonate_public',
@@ -23,6 +24,7 @@ const ACTIVE_ALERT_STATUSES = ['sent', 'viewed', 'following_up'];
 const MAX_STUDENT_NO_LENGTH = 64;
 const MAX_ALERT_CONTENT_LENGTH = 1000;
 const MAX_SOURCE_REFERENCE_LENGTH = 128;
+const MAX_ACTION_CONTENT_LENGTH = 1000;
 
 const ERROR_MESSAGES = {
   INVALID_INPUT: '请求内容无效',
@@ -146,6 +148,16 @@ function parseAlertDispatchBody(body) {
     return null;
   }
   return { version: parsed.version };
+}
+
+function parseReportStartProcessBody(body) {
+  const parsed = parseJsonObjectBody(body);
+  if (!parsed || !hasOnlyAllowedKeys(parsed, REPORT_START_PROCESS_INPUT_KEYS, REPORT_START_PROCESS_INPUT_KEYS) ||
+    !Number.isSafeInteger(parsed.version) || parsed.version <= 0) {
+    return null;
+  }
+  const actionContent = normalizeRequiredString(parsed.actionContent, MAX_ACTION_CONTENT_LENGTH);
+  return actionContent ? { version: parsed.version, actionContent } : null;
 }
 
 function businessError(code) {
@@ -573,6 +585,23 @@ function createAlertDispatchAudit({ alertId, actorId, requestId, serverDate, cre
   };
 }
 
+function createReportStartProcessAudit({ reportId, actorId, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'report.start_process',
+    resourceType: 'fraud_report',
+    resourceId: reportId,
+    result: 'success',
+    beforeSummary: { status: 'pending_security_verify' },
+    afterSummary: { status: 'in_process' },
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
 function createSecurityAlertService({
   authService,
   db,
@@ -804,6 +833,108 @@ function createSecurityAlertService({
   return { create, dispatch };
 }
 
+function createSecurityReportProcessingService({
+  authService,
+  db,
+  serverDate,
+  createDispositionId = () => `disposition_${crypto.randomUUID().replace(/-/g, '')}`,
+  createAuditId = () => `audit_${crypto.randomUUID().replace(/-/g, '')}`,
+  createRequestId = () => crypto.randomUUID(),
+  logger = console,
+  configured = true,
+} = {}) {
+  const dependenciesReady = configured &&
+    authService && typeof authService.authenticateSecuritySession === 'function' &&
+    db && typeof db.runTransaction === 'function' && typeof db.collection === 'function' &&
+    typeof serverDate === 'function';
+
+  function internalFailure(requestId, stage, resourceId = null) {
+    safeLog(logger, { requestId, code: 'INTERNAL_ERROR', resourceId, stage });
+    return failure('INTERNAL_ERROR');
+  }
+
+  async function authenticate(authorization, requestId) {
+    try {
+      return await authService.authenticateSecuritySession(authorization);
+    } catch (error) {
+      return { ok: false, result: internalFailure(requestId, 'securityReportStartProcessAuthentication') };
+    }
+  }
+
+  async function startProcess(authorization, reportId, body) {
+    const requestId = createRequestId();
+    const input = parseReportStartProcessBody(body);
+    if (!input) {
+      return failure('INVALID_INPUT');
+    }
+    if (!dependenciesReady) {
+      return internalFailure(requestId, 'securityReportStartProcessConfiguration', reportId || null);
+    }
+
+    const authenticated = await authenticate(authorization, requestId);
+    if (!authenticated.ok) {
+      return authenticated.result;
+    }
+
+    const dispositionId = createDispositionId();
+    const auditId = createAuditId();
+    try {
+      const report = await db.runTransaction(async (transaction) => {
+        const currentReport = await findRecordById(transaction, 'fraud_reports', reportId);
+        if (!currentReport) {
+          throw businessError('NOT_FOUND');
+        }
+        if (currentReport.status !== 'pending_security_verify' || currentReport.version !== input.version) {
+          throw businessError('CONFLICT');
+        }
+
+        const updateResult = ensureDatabaseResult(await transaction.collection('fraud_reports').doc(currentReport._id).update({
+          status: 'in_process',
+          currentHandlerId: authenticated.user._id,
+          updatedAt: serverDate(),
+          version: input.version + 1,
+        }));
+        if (updatedCount(updateResult) !== 1) {
+          throw businessError('CONFLICT');
+        }
+
+        ensureSuccessfulInsert(await transaction.collection('security_dispositions').add({
+          _id: dispositionId,
+          reportId: currentReport._id,
+          operatorId: authenticated.user._id,
+          action: 'start_process',
+          statusAfter: 'in_process',
+          actionContent: input.actionContent,
+          createdAt: serverDate(),
+        }));
+        ensureSuccessfulInsert(await transaction.collection('audit_logs').add(createReportStartProcessAudit({
+          reportId: currentReport._id,
+          actorId: authenticated.user._id,
+          requestId,
+          serverDate,
+          createAuditId: () => auditId,
+        })));
+        return {
+          reportId: currentReport._id,
+          status: 'in_process',
+          version: input.version + 1,
+        };
+      });
+      return success('REPORT_PROCESSING_STARTED', { report });
+    } catch (error) {
+      if (error && error.isBusinessError) {
+        return failure(error.businessCode);
+      }
+      if (isTransactionConflict(error)) {
+        return failure('CONFLICT');
+      }
+      return internalFailure(requestId, 'securityReportStartProcessTransaction', reportId || null);
+    }
+  }
+
+  return { startProcess };
+}
+
 function readHeader(headers, name) {
   if (!headers || typeof headers !== 'object') {
     return undefined;
@@ -891,7 +1022,12 @@ function getAlertDispatchId(path) {
   return match ? match[1] : null;
 }
 
-function createHttpHandler({ authService, alertService = null, allowedOrigins, logger = console }) {
+function getReportStartProcessId(path) {
+  const match = /^\/reports\/([^/]+)\/start-process$/.exec(path);
+  return match ? match[1] : null;
+}
+
+function createHttpHandler({ authService, alertService = null, reportProcessingService = null, allowedOrigins, logger = console }) {
   if (!authService || typeof authService.login !== 'function' || typeof authService.session !== 'function') {
     throw new Error('securityAuthHttp requires an authentication service');
   }
@@ -905,7 +1041,7 @@ function createHttpHandler({ authService, alertService = null, allowedOrigins, l
         ? 'POST, OPTIONS'
         : path === '/session'
           ? 'GET, OPTIONS'
-          : (path === '/alerts' || getAlertDispatchId(path))
+          : (path === '/alerts' || getAlertDispatchId(path) || getReportStartProcessId(path))
             ? 'POST, OPTIONS'
             : null;
       if (!allowedMethods) {
@@ -942,6 +1078,17 @@ function createHttpHandler({ authService, alertService = null, allowedOrigins, l
         return httpResponse(await alertService.dispatch(
           readHeader(event && event.headers, 'authorization'),
           alertId,
+          event && event.body,
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      const reportId = getReportStartProcessId(path);
+      if (method === 'POST' && reportId) {
+        if (!reportProcessingService || typeof reportProcessingService.startProcess !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await reportProcessingService.startProcess(
+          readHeader(event && event.headers, 'authorization'),
+          reportId,
           event && event.body,
         ), buildResponseHeaders(origin, originWhitelist));
       }
@@ -1014,7 +1161,14 @@ function createDefaultHandler(options = {}) {
       logger,
       configured: dependencies.configured,
     });
-    return createHttpHandler({ authService, alertService, allowedOrigins: environment.SECURITY_WEB_ALLOWED_ORIGINS, logger });
+    const reportProcessingService = createSecurityReportProcessingService({
+      authService,
+      db: dependencies.db,
+      serverDate: dependencies.serverDate,
+      logger,
+      configured: dependencies.configured,
+    });
+    return createHttpHandler({ authService, alertService, reportProcessingService, allowedOrigins: environment.SECURITY_WEB_ALLOWED_ORIGINS, logger });
   } catch (error) {
     const unavailableService = {
       login: async () => failure('INTERNAL_ERROR'),
@@ -1085,14 +1239,18 @@ exports.__testables = {
   createDefaultHandler,
   createHttpHandler,
   createSecurityAlertService,
+  createSecurityReportProcessingService,
   calculateManualAlertRisk,
   createLoginAudit,
+  createReportStartProcessAudit,
   getAlertDispatchId,
+  getReportStartProcessId,
   createNodeServer,
   mintSessionToken,
   normalizeLoginName,
   parseAlertCreateBody,
   parseAlertDispatchBody,
+  parseReportStartProcessBody,
   parseAllowedOrigins,
   parseLoginBody,
   verifySessionToken,
