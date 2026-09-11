@@ -87,6 +87,10 @@ function createMockDb({ users = [], colleges = [], options = {} } = {}) {
     }
 
     return {
+      async get() {
+        state.reads.push({ collection: name, operation: 'get', inTransaction });
+        return { data: documents(name).map(clone) };
+      },
       doc(id) {
         return {
           async get() {
@@ -292,6 +296,18 @@ test('2a. 短身份编号不泄露完整值，长编号保持最小展示掩码'
   assert.equal(maskIdentityNo('20260001'), '20****01');
   assert.notEqual(maskIdentityNo('T01'), 'T01');
   assert.notEqual(maskIdentityNo('T001'), 'T001');
+});
+
+test('2b. 停用学院不会出现在新增身份选项，但既有身份仍显示真实历史学院名称', async () => {
+  const fixture = await createFixture({
+    users: [await securityUser(), identityUser({ collegeId: 'college_old' })],
+    colleges: [activeCollege({ _id: 'college_old', name: '历史学院', status: 'disabled' }), activeCollege()],
+  });
+  const response = await request(fixture, { method: 'GET', path: '/identities', headers: authorization(fixture.token) });
+
+  assert.equal(response.json.code, 'IDENTITIES_LOADED');
+  assert.equal(response.json.identities[0].collegeName, '历史学院');
+  assert.equal(response.json.colleges.some((college) => college.collegeId === 'college_old'), false);
 });
 
 test('3. POST identities 可事务创建 student 与 counselor，服务端固定身份字段', async () => {

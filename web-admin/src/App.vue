@@ -13,11 +13,15 @@ const FRAUD_TYPES = [
 ];
 const FRAUD_TYPE_LABELS = Object.fromEntries(FRAUD_TYPES.map(({ value, label }) => [value, label]));
 const RISK_LEVEL_LABELS = { low: "低风险", medium: "中风险", high: "高风险" };
-const STATUS_LABELS = { pending_dispatch: "待下发", sent: "已下发" };
+const STATUS_LABELS = {
+  pending_dispatch: "待下发", sent: "已下发", pending_security_verify: "待保卫处核验",
+  in_process: "处理中", closed: "已结案", viewed: "已查看", following_up: "跟进中",
+};
 const TOKEN_ERROR_CODES = new Set(["TOKEN_MISSING", "TOKEN_INVALID", "TOKEN_EXPIRED"]);
 const IDENTITY_ROLE_LABELS = { student: "学生", counselor: "辅导员" };
 const IDENTITY_BIND_STATUS_LABELS = { bound: "已绑定", unbound: "未绑定" };
 const IDENTITY_STATUS_LABELS = { active: "正常", suspended: "已停用" };
+const COLLEGE_STATUS_LABELS = { active: "启用", disabled: "已停用" };
 
 const loginName = ref("");
 const password = ref("");
@@ -29,6 +33,8 @@ const dispatchLoading = ref(false);
 const message = ref("");
 const successMessage = ref("");
 const createdAlert = ref(null);
+const dashboard = ref(null);
+const dashboardLoading = ref(false);
 const studentNo = ref("");
 const fraudType = ref("part_time_scam");
 const content = ref("");
@@ -41,6 +47,12 @@ const identitySaving = ref(false);
 const identityActionLoading = ref("");
 const showIdentityCreatePanel = ref(false);
 const identityForm = ref({ name: "", role: "student", identityNo: "", collegeId: "" });
+const managedColleges = ref([]);
+const collegesLoading = ref(false);
+const collegeSaving = ref(false);
+const collegeActionLoading = ref("");
+const showCollegeCreatePanel = ref(false);
+const collegeName = ref("");
 const isAuthenticated = computed(() => profile.value !== null);
 const canDispatch = computed(() => createdAlert.value?.status === "pending_dispatch");
 const identityNoHint = computed(() => identityForm.value.role === "student" ? "身份编号填写学号" : "身份编号填写工号");
@@ -80,8 +92,11 @@ function clearSession() {
   createdAlert.value = null;
   identities.value = [];
   colleges.value = [];
+  dashboard.value = null;
+  managedColleges.value = [];
   activeView.value = "dashboard";
   showIdentityCreatePanel.value = false;
+  showCollegeCreatePanel.value = false;
 }
 
 function handleApiError(error) {
@@ -150,6 +165,17 @@ function statusLabel(value) {
   return STATUS_LABELS[value] || value;
 }
 
+function collegeStatusLabel(value) {
+  return COLLEGE_STATUS_LABELS[value] || value;
+}
+
+function displayDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("zh-CN", {
+    timeZone: "Asia/Shanghai", hour12: false,
+  });
+}
+
 function fraudTypeLabel(value) {
   return FRAUD_TYPE_LABELS[value] || value;
 }
@@ -184,6 +210,31 @@ function isCollegeOption(college) {
     typeof college.name === "string" && college.name;
 }
 
+function isManagedCollege(college) {
+  return Boolean(college) && typeof college.collegeId === "string" && college.collegeId &&
+    typeof college.name === "string" && college.name &&
+    (college.status === "active" || college.status === "disabled") &&
+    Number.isSafeInteger(college.identityCount) && college.identityCount >= 0 &&
+    Number.isSafeInteger(college.activeIdentityCount) && college.activeIdentityCount >= 0;
+}
+
+function isDashboardItem(item, idField) {
+  return Boolean(item) && typeof item[idField] === "string" && item[idField] &&
+    typeof item.fraudType === "string" && typeof item.riskLevel === "string" &&
+    typeof item.status === "string" && typeof item.collegeName === "string" && item.createdAt;
+}
+
+function isDashboardPayload(payload) {
+  const metricKeys = ["pendingSecurityVerifyCount", "inProcessCount", "closedCount", "todayNewReportCount"];
+  const identityKeys = ["studentCount", "counselorCount", "boundCount", "unboundCount"];
+  return payload.code === "DASHBOARD_LOADED" && payload.metrics && payload.identitySummary && payload.collegeSummary &&
+    metricKeys.every((key) => Number.isSafeInteger(payload.metrics[key]) && payload.metrics[key] >= 0) &&
+    identityKeys.every((key) => Number.isSafeInteger(payload.identitySummary[key]) && payload.identitySummary[key] >= 0) &&
+    Number.isSafeInteger(payload.collegeSummary.activeCount) && Number.isSafeInteger(payload.collegeSummary.totalCount) &&
+    Array.isArray(payload.pendingReports) && payload.pendingReports.length <= 5 && payload.pendingReports.every((item) => isDashboardItem(item, "reportId")) &&
+    Array.isArray(payload.recentAlerts) && payload.recentAlerts.length <= 5 && payload.recentAlerts.every((item) => isDashboardItem(item, "alertId"));
+}
+
 function resetIdentityForm() {
   identityForm.value = { name: "", role: "student", identityNo: "", collegeId: colleges.value[0]?.collegeId || "" };
 }
@@ -201,7 +252,9 @@ function selectNavigation(view) {
   activeView.value = view;
   successMessage.value = "";
   message.value = "";
+  if (view === "dashboard") void loadDashboard();
   if (view === "identities") void loadIdentities();
+  if (view === "colleges") void loadColleges();
 }
 
 async function loadSession() {
@@ -226,10 +279,34 @@ async function loadSession() {
     };
     activeView.value = "dashboard";
     message.value = "";
+    await loadDashboard();
   } catch (error) {
     handleApiError(error);
   } finally {
     sessionLoading.value = false;
+  }
+}
+
+async function loadDashboard() {
+  if (dashboardLoading.value || !isAuthenticated.value || !requireApiBaseUrl()) return;
+  dashboardLoading.value = true;
+  try {
+    const response = await fetch(`${apiBaseUrl}/dashboard`, {
+      method: "GET", headers: { Authorization: `Bearer ${currentToken()}` },
+    });
+    const payload = await readApiResponse(response);
+    if (!isDashboardPayload(payload)) throw new ApiError("INTERNAL_ERROR");
+    dashboard.value = {
+      metrics: { ...payload.metrics }, identitySummary: { ...payload.identitySummary },
+      collegeSummary: { ...payload.collegeSummary },
+      pendingReports: payload.pendingReports.map((item) => ({ ...item })),
+      recentAlerts: payload.recentAlerts.map((item) => ({ ...item })),
+    };
+    message.value = "";
+  } catch (error) {
+    handleApiError(error);
+  } finally {
+    dashboardLoading.value = false;
   }
 }
 
@@ -264,6 +341,93 @@ async function loadIdentities() {
     handleApiError(error);
   } finally {
     identitiesLoading.value = false;
+  }
+}
+
+async function loadColleges() {
+  if (collegesLoading.value || !isAuthenticated.value || !requireApiBaseUrl()) return;
+  collegesLoading.value = true;
+  try {
+    const response = await fetch(`${apiBaseUrl}/colleges`, {
+      method: "GET", headers: { Authorization: `Bearer ${currentToken()}` },
+    });
+    const payload = await readApiResponse(response);
+    if (payload.code !== "COLLEGES_LOADED" || !Array.isArray(payload.colleges) || !payload.colleges.every(isManagedCollege)) {
+      throw new ApiError("INTERNAL_ERROR");
+    }
+    managedColleges.value = payload.colleges.map((college) => ({ ...college }));
+    message.value = "";
+  } catch (error) {
+    handleApiError(error);
+  } finally {
+    collegesLoading.value = false;
+  }
+}
+
+function openCollegeCreatePanel() {
+  collegeName.value = "";
+  showCollegeCreatePanel.value = true;
+}
+
+function closeCollegeCreatePanel() {
+  if (!collegeSaving.value) showCollegeCreatePanel.value = false;
+}
+
+async function createCollege() {
+  const name = collegeName.value.trim();
+  if (collegeSaving.value || !requireApiBaseUrl()) return;
+  if (!name || name.length > 64) {
+    setError("INVALID_INPUT");
+    return;
+  }
+  collegeSaving.value = true;
+  message.value = "";
+  successMessage.value = "";
+  try {
+    const response = await fetch(`${apiBaseUrl}/colleges`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentToken()}` },
+      body: JSON.stringify({ name }),
+    });
+    const payload = await readApiResponse(response);
+    if (payload.code !== "COLLEGE_CREATED") throw new ApiError("INTERNAL_ERROR");
+    showCollegeCreatePanel.value = false;
+    activeView.value = "identities";
+    successMessage.value = "学院已创建，可继续新增身份。";
+    await loadIdentities();
+  } catch (error) {
+    handleApiError(error);
+  } finally {
+    collegeSaving.value = false;
+  }
+}
+
+async function changeCollegeStatus(college) {
+  if (collegeActionLoading.value || !requireApiBaseUrl()) return;
+  const nextStatus = college.status === "active" ? "disabled" : "active";
+  if (nextStatus === "disabled" && !window.confirm(`确认停用“${college.name}”吗？`)) return;
+  collegeActionLoading.value = college.collegeId;
+  message.value = "";
+  successMessage.value = "";
+  try {
+    const response = await fetch(`${apiBaseUrl}/colleges/${encodeURIComponent(college.collegeId)}/status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentToken()}` },
+      body: JSON.stringify({ status: nextStatus }),
+    });
+    const payload = await readApiResponse(response);
+    if (payload.code !== "COLLEGE_STATUS_UPDATED") throw new ApiError("INTERNAL_ERROR");
+    successMessage.value = `学院已${nextStatus === "active" ? "启用" : "停用"}。`;
+    await loadColleges();
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "COLLEGE_IN_USE") {
+      successMessage.value = "";
+      message.value = "该学院仍有正常使用中的学生或辅导员身份，请先停用相关身份。";
+    } else {
+      handleApiError(error);
+    }
+  } finally {
+    collegeActionLoading.value = "";
   }
 }
 
@@ -537,6 +701,7 @@ onMounted(() => {
           <button type="button" :class="{ active: activeView === 'alerts' }" @click="selectNavigation('alerts')">预警管理</button>
           <button type="button" :class="{ active: activeView === 'reports' }" @click="selectNavigation('reports')">工单管理</button>
           <button type="button" :class="{ active: activeView === 'identities' }" @click="selectNavigation('identities')">身份管理</button>
+          <button type="button" :class="{ active: activeView === 'colleges' }" @click="selectNavigation('colleges')">学院管理</button>
         </nav>
         <div class="sidebar-footer">
           <p>当前用户：{{ profile.name }}</p>
@@ -556,10 +721,38 @@ onMounted(() => {
         <p v-if="message" class="message workbench-message" role="status">{{ message }}</p>
         <p v-if="successMessage" class="success-message" role="status">{{ successMessage }}</p>
 
-        <section v-if="activeView === 'dashboard'" class="panel welcome-panel" aria-labelledby="dashboard-title">
-          <p class="eyebrow">工作台</p>
-          <h2 id="dashboard-title">欢迎回来，{{ profile.name }}</h2>
-          <p>从左侧导航进入预警、工单或身份管理。</p>
+        <section v-if="activeView === 'dashboard'" class="dashboard-page" aria-labelledby="dashboard-title">
+          <header class="section-page-header dashboard-title-row">
+            <div><h2 id="dashboard-title">保卫处工作台</h2><p>校园反诈业务概览</p></div>
+            <button type="button" class="secondary-button" :disabled="dashboardLoading" @click="loadDashboard">{{ dashboardLoading ? "刷新中…" : "刷新数据" }}</button>
+          </header>
+          <p v-if="dashboardLoading && !dashboard" class="table-state">正在加载工作台数据…</p>
+          <template v-else-if="dashboard">
+            <section class="metric-grid" aria-label="工单统计">
+              <article class="metric-card"><span>待保卫处核验</span><strong>{{ dashboard.metrics.pendingSecurityVerifyCount }}</strong></article>
+              <article class="metric-card"><span>处理中</span><strong>{{ dashboard.metrics.inProcessCount }}</strong></article>
+              <article class="metric-card"><span>已结案</span><strong>{{ dashboard.metrics.closedCount }}</strong></article>
+              <article class="metric-card"><span>今日新增</span><strong>{{ dashboard.metrics.todayNewReportCount }}</strong></article>
+            </section>
+
+            <section class="dashboard-grid">
+              <article class="panel dashboard-panel">
+                <h3>待办工单</h3>
+                <p v-if="dashboard.pendingReports.length === 0" class="table-state">当前暂无待处理工单</p>
+                <div v-else class="table-scroll"><table class="dashboard-table"><thead><tr><th>诈骗类型</th><th>风险等级</th><th>状态</th><th>学院</th><th>时间</th></tr></thead><tbody><tr v-for="report in dashboard.pendingReports" :key="report.reportId"><td>{{ fraudTypeLabel(report.fraudType) }}</td><td>{{ riskLevelLabel(report.riskLevel) }}</td><td>{{ statusLabel(report.status) }}</td><td>{{ report.collegeName || "—" }}</td><td>{{ displayDate(report.createdAt) }}</td></tr></tbody></table></div>
+              </article>
+              <article class="panel dashboard-panel">
+                <h3>最新预警</h3>
+                <p v-if="dashboard.recentAlerts.length === 0" class="table-state">当前暂无最新预警</p>
+                <div v-else class="table-scroll"><table class="dashboard-table"><thead><tr><th>诈骗类型</th><th>风险等级</th><th>状态</th><th>学院</th><th>时间</th></tr></thead><tbody><tr v-for="alert in dashboard.recentAlerts" :key="alert.alertId"><td>{{ fraudTypeLabel(alert.fraudType) }}</td><td>{{ riskLevelLabel(alert.riskLevel) }}</td><td>{{ statusLabel(alert.status) }}</td><td>{{ alert.collegeName || "—" }}</td><td>{{ displayDate(alert.createdAt) }}</td></tr></tbody></table></div>
+              </article>
+            </section>
+
+            <section class="dashboard-grid dashboard-bottom-grid">
+              <article class="panel dashboard-panel"><h3>人员与学院概览</h3><dl class="summary-list"><div><dt>学生身份</dt><dd>{{ dashboard.identitySummary.studentCount }}</dd></div><div><dt>辅导员身份</dt><dd>{{ dashboard.identitySummary.counselorCount }}</dd></div><div><dt>已绑定</dt><dd>{{ dashboard.identitySummary.boundCount }}</dd></div><div><dt>未绑定</dt><dd>{{ dashboard.identitySummary.unboundCount }}</dd></div><div><dt>启用学院</dt><dd>{{ dashboard.collegeSummary.activeCount }} / {{ dashboard.collegeSummary.totalCount }}</dd></div></dl></article>
+              <article class="panel dashboard-panel"><h3>快捷操作</h3><div class="quick-actions"><button type="button" @click="selectNavigation('alerts')">新建预警</button><button type="button" class="secondary-button" @click="selectNavigation('identities')">身份管理</button><button type="button" class="secondary-button" @click="selectNavigation('colleges')">学院管理</button></div></article>
+            </section>
+          </template>
         </section>
 
         <template v-else-if="activeView === 'alerts'">
@@ -621,7 +814,7 @@ onMounted(() => {
           <p>本轮不展示或伪造任何工单数据。</p>
         </section>
 
-        <section v-else class="identity-page" aria-labelledby="identities-title">
+        <section v-else-if="activeView === 'identities'" class="identity-page" aria-labelledby="identities-title">
           <header class="section-page-header">
             <div>
               <h2 id="identities-title">身份管理</h2>
@@ -669,6 +862,30 @@ onMounted(() => {
                 <label>学院<select v-model="identityForm.collegeId" name="identityCollege" required :disabled="identitySaving || colleges.length === 0"><option disabled value="">请选择学院</option><option v-for="college in colleges" :key="college.collegeId" :value="college.collegeId">{{ college.name }}</option></select></label>
                 <button type="submit" :disabled="identitySaving || colleges.length === 0">{{ identitySaving ? '创建中…' : '创建身份' }}</button>
               </form>
+            </section>
+          </div>
+        </section>
+
+        <section v-else-if="activeView === 'colleges'" class="identity-page" aria-labelledby="colleges-title">
+          <header class="section-page-header">
+            <div><h2 id="colleges-title">学院管理</h2><p>维护学生和辅导员所属学院</p></div>
+            <button type="button" :disabled="collegesLoading" @click="openCollegeCreatePanel">新增学院</button>
+          </header>
+
+          <section class="panel identity-panel">
+            <p v-if="collegesLoading" class="table-state">正在加载学院列表…</p>
+            <p v-else-if="managedColleges.length === 0" class="table-state">暂无学院。</p>
+            <div v-else class="table-scroll">
+              <table class="identity-table college-table"><thead><tr><th>学院名称</th><th>身份数量</th><th>有效身份</th><th>学院状态</th><th>操作</th></tr></thead><tbody>
+                <tr v-for="college in managedColleges" :key="college.collegeId"><td>{{ college.name }}</td><td>{{ college.identityCount }}</td><td>{{ college.activeIdentityCount }}</td><td><span class="status-pill" :class="college.status">{{ collegeStatusLabel(college.status) }}</span></td><td class="identity-actions"><button type="button" class="text-button" :disabled="Boolean(collegeActionLoading)" @click="changeCollegeStatus(college)">{{ college.status === "active" ? "停用" : "启用" }}</button></td></tr>
+              </tbody></table>
+            </div>
+          </section>
+
+          <div v-if="showCollegeCreatePanel" class="modal-backdrop" @click.self="closeCollegeCreatePanel">
+            <section class="identity-modal" role="dialog" aria-modal="true" aria-labelledby="college-create-title">
+              <header class="modal-header"><div><h2 id="college-create-title">新增学院</h2><p>学院编号将由系统自动生成。</p></div><button type="button" class="secondary-button" :disabled="collegeSaving" @click="closeCollegeCreatePanel">关闭</button></header>
+              <form class="identity-form" @submit.prevent="createCollege"><label>学院名称<input v-model="collegeName" name="collegeName" maxlength="64" required :disabled="collegeSaving" /></label><button type="submit" :disabled="collegeSaving">{{ collegeSaving ? "创建中…" : "创建学院" }}</button></form>
             </section>
           </div>
         </section>

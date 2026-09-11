@@ -14,19 +14,30 @@ function failure(code, message) {
   return { ok: false, code, message };
 }
 
-function toProfile(user) {
-  return {
+function toProfile(user, collegeName = '') {
+  const profile = {
     userId: user._id,
     role: user.role,
     name: user.name,
     collegeId: user.collegeId,
     focusFlag: user.focusFlag,
   };
+  if (typeof collegeName === 'string' && collegeName.trim()) {
+    profile.collegeName = collegeName.trim();
+  }
+  return profile;
 }
 
 async function findUserByWxIdentityKey(db, wxIdentityKey) {
   const result = await db.collection('users').where({ wxIdentityKey }).limit(1).get();
   return Array.isArray(result.data) && result.data.length > 0 ? result.data[0] : null;
+}
+
+async function findCollegeName(db, collegeId) {
+  if (typeof collegeId !== 'string' || !collegeId.trim()) return '';
+  const result = await db.collection('colleges').where({ _id: collegeId }).limit(1).get();
+  const college = Array.isArray(result.data) && result.data.length > 0 ? result.data[0] : null;
+  return college && typeof college.name === 'string' && college.name.trim() ? college.name.trim() : '';
 }
 
 function getAppId(wxContext) {
@@ -116,9 +127,11 @@ function createHandler({
         return auditedFailure(user, 'INTERNAL_ERROR', '账号绑定状态异常，请联系管理员', 'sessionBindingConsistency');
       }
 
+      const collegeName = await findCollegeName(db, user.collegeId);
+
       return success('BOUND', {
         needsBinding: false,
-        profile: toProfile(user),
+        profile: toProfile(user, collegeName),
       });
     } catch (error) {
       logger.error({ requestId, code: 'INTERNAL_ERROR', resourceId: null, stage: 'session' });
@@ -148,6 +161,7 @@ exports.__testables = {
   createHandler,
   createDefaultHandler,
   createFailureAuditLog,
+  findCollegeName,
   toProfile,
   EXPECTED_APP_ID,
   TARGET_ENV_ID,

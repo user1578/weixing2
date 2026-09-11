@@ -24,8 +24,12 @@ const REPORT_CLOSE_INPUT_KEYS = new Set([
 const IDENTITY_CREATE_INPUT_KEYS = new Set(['role', 'identityNo', 'name', 'collegeId']);
 const IDENTITY_UNBIND_INPUT_KEYS = new Set(['version']);
 const IDENTITY_STATUS_INPUT_KEYS = new Set(['version', 'status']);
+const COLLEGE_CREATE_INPUT_KEYS = new Set(['name']);
+const COLLEGE_STATUS_INPUT_KEYS = new Set(['status']);
 const MANAGEABLE_IDENTITY_ROLES = new Set(['student', 'counselor']);
 const MANAGEABLE_IDENTITY_STATUSES = new Set(['active', 'suspended']);
+const COLLEGE_STATUSES = new Set(['active', 'disabled']);
+const DASHBOARD_REPORT_STATUSES = new Set(['pending_security_verify', 'in_process']);
 const ALLOWED_REPORT_CLOSE_VERIFICATION_RESULTS = new Set([
   'confirmed',
   'suspected',
@@ -56,6 +60,9 @@ const MAX_CLOSE_REASON_LENGTH = 1000;
 const MAX_IDENTITY_NO_LENGTH = 64;
 const MAX_IDENTITY_NAME_LENGTH = 64;
 const MAX_COLLEGE_ID_LENGTH = 64;
+const MAX_COLLEGE_NAME_LENGTH = 64;
+const DASHBOARD_LIST_READ_LIMIT = 100;
+const DASHBOARD_COLLEGE_READ_LIMIT = 500;
 
 const ERROR_MESSAGES = {
   INVALID_INPUT: '请求内容无效',
@@ -66,6 +73,7 @@ const ERROR_MESSAGES = {
   ACCOUNT_DISABLED: '账号当前不可用',
   FORBIDDEN: '当前账号无权访问',
   CONFLICT: '资源状态已变化，请刷新后重试',
+  COLLEGE_IN_USE: '学院仍有关联的正常身份',
   INTERNAL_ERROR: '服务暂时不可用，请稍后重试',
   NOT_FOUND: '接口不存在',
 };
@@ -249,6 +257,24 @@ function parseIdentityStatusBody(body) {
   return { version: parsed.version, status: parsed.status };
 }
 
+function parseCollegeCreateBody(body) {
+  const parsed = parseJsonObjectBody(body);
+  if (!parsed || !hasOnlyAllowedKeys(parsed, COLLEGE_CREATE_INPUT_KEYS, COLLEGE_CREATE_INPUT_KEYS)) {
+    return null;
+  }
+  const name = normalizeRequiredString(parsed.name, MAX_COLLEGE_NAME_LENGTH);
+  return name ? { name } : null;
+}
+
+function parseCollegeStatusBody(body) {
+  const parsed = parseJsonObjectBody(body);
+  if (!parsed || !hasOnlyAllowedKeys(parsed, COLLEGE_STATUS_INPUT_KEYS, COLLEGE_STATUS_INPUT_KEYS) ||
+    typeof parsed.status !== 'string' || !COLLEGE_STATUSES.has(parsed.status)) {
+    return null;
+  }
+  return { status: parsed.status };
+}
+
 function businessError(code) {
   const error = new Error(code);
   error.isBusinessError = true;
@@ -277,6 +303,11 @@ function updatedCount(result) {
     return result.stats.updated;
   }
   return 0;
+}
+
+function countTotal(result) {
+  ensureDatabaseResult(result);
+  return Number.isSafeInteger(result.total) && result.total >= 0 ? result.total : null;
 }
 
 function ensureDatabaseResult(result) {
@@ -803,6 +834,81 @@ function isActiveCollege(college) {
   return Boolean(college) && college.status === 'active';
 }
 
+function collegeIdForName(name) {
+  return `college_${crypto.createHash('sha256').update(name, 'utf8').digest('hex').slice(0, 16)}`;
+}
+
+function toCollegeListItem(college, identityCounts) {
+  const counts = identityCounts.get(college._id) || { identityCount: 0, activeIdentityCount: 0 };
+  return {
+    collegeId: college._id,
+    name: college.name,
+    status: college.status,
+    identityCount: counts.identityCount,
+    activeIdentityCount: counts.activeIdentityCount,
+  };
+}
+
+function toDashboardItem(record, collegeNames, idField) {
+  return {
+    [idField]: record._id,
+    fraudType: record.fraudType,
+    riskLevel: record.riskLevel,
+    status: record.status,
+    collegeName: collegeNames.get(record.collegeId) || '',
+    createdAt: record.createdAt,
+  };
+}
+
+function dateValue(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.getTime();
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function shanghaiDayStart(now) {
+  const shanghaiOffsetMilliseconds = 8 * 60 * 60 * 1000;
+  const shifted = new Date(now.getTime() + shanghaiOffsetMilliseconds);
+  return new Date(Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate(),
+  ) - shanghaiOffsetMilliseconds);
+}
+
+function createCollegeCreateAudit({ collegeId, actorId, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'college.create',
+    resourceType: 'college',
+    resourceId: collegeId,
+    result: 'success',
+    afterSummary: { status: 'active' },
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
+function createCollegeStatusAudit({ collegeId, actorId, beforeStatus, afterStatus, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'college.status_update',
+    resourceType: 'college',
+    resourceId: collegeId,
+    result: 'success',
+    beforeSummary: { status: beforeStatus },
+    afterSummary: { status: afterStatus },
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
 function createSecurityAlertService({
   authService,
   db,
@@ -1313,7 +1419,7 @@ function createSecurityIdentityManagementService({
     try {
       const [usersResult, collegesResult] = await Promise.all([
         db.collection('users').where({ role: db.command.in([...MANAGEABLE_IDENTITY_ROLES]) }).get(),
-        db.collection('colleges').where({ status: 'active' }).get(),
+        db.collection('colleges').get(),
       ]);
       ensureDatabaseResult(usersResult);
       ensureDatabaseResult(collegesResult);
@@ -1323,10 +1429,12 @@ function createSecurityIdentityManagementService({
       return internalFailure(requestId, 'securityIdentityListRead');
     }
 
-    const activeColleges = colleges
+    const validColleges = colleges
+      .filter((college) => college && typeof college._id === 'string' && college._id && typeof college.name === 'string' && college.name.trim());
+    const activeColleges = validColleges
       .filter((college) => isActiveCollege(college) && typeof college._id === 'string' && college._id && typeof college.name === 'string' && college.name.trim())
       .map((college) => ({ collegeId: college._id, name: college.name.trim() }));
-    const collegeNames = new Map(activeColleges.map((college) => [college.collegeId, college.name]));
+    const collegeNames = new Map(validColleges.map((college) => [college._id, college.name.trim()]));
     const identities = users
       .filter(isManageableIdentity)
       .map((user) => toIdentityListItem(user, collegeNames));
@@ -1556,6 +1664,262 @@ function createSecurityIdentityManagementService({
   return { list, create, unbind, updateStatus };
 }
 
+function createSecurityCollegeManagementService({
+  authService,
+  db,
+  serverDate,
+  createAuditId = () => `audit_${crypto.randomUUID().replace(/-/g, '')}`,
+  createRequestId = () => crypto.randomUUID(),
+  logger = console,
+  configured = true,
+} = {}) {
+  const dependenciesReady = configured &&
+    authService && typeof authService.authenticateSecuritySession === 'function' &&
+    db && typeof db.runTransaction === 'function' && typeof db.collection === 'function' &&
+    db.command && typeof db.command.in === 'function' &&
+    typeof serverDate === 'function';
+
+  function internalFailure(requestId, stage, resourceId = null) {
+    safeLog(logger, { requestId, code: 'INTERNAL_ERROR', resourceId, stage });
+    return failure('INTERNAL_ERROR');
+  }
+
+  async function authenticate(authorization, requestId, stage) {
+    try {
+      return await authService.authenticateSecuritySession(authorization);
+    } catch (error) {
+      return { ok: false, result: internalFailure(requestId, stage) };
+    }
+  }
+
+  async function list(authorization) {
+    const requestId = createRequestId();
+    if (!dependenciesReady) return internalFailure(requestId, 'securityCollegeListConfiguration');
+    const authenticated = await authenticate(authorization, requestId, 'securityCollegeListAuthentication');
+    if (!authenticated.ok) return authenticated.result;
+
+    try {
+      const [collegesResult, usersResult] = await Promise.all([
+        db.collection('colleges').limit(DASHBOARD_COLLEGE_READ_LIMIT).get(),
+        db.collection('users').where({ role: db.command.in([...MANAGEABLE_IDENTITY_ROLES]) }).get(),
+      ]);
+      ensureDatabaseResult(collegesResult);
+      ensureDatabaseResult(usersResult);
+      const identityCounts = new Map();
+      for (const user of (Array.isArray(usersResult.data) ? usersResult.data : [])) {
+        if (!isManageableIdentity(user) || typeof user.collegeId !== 'string' || !user.collegeId) continue;
+        const counts = identityCounts.get(user.collegeId) || { identityCount: 0, activeIdentityCount: 0 };
+        counts.identityCount += 1;
+        if (user.status === 'active') counts.activeIdentityCount += 1;
+        identityCounts.set(user.collegeId, counts);
+      }
+      const colleges = (Array.isArray(collegesResult.data) ? collegesResult.data : [])
+        .filter((college) => college && typeof college._id === 'string' && college._id &&
+          typeof college.name === 'string' && college.name && COLLEGE_STATUSES.has(college.status))
+        .map((college) => toCollegeListItem(college, identityCounts));
+      return success('COLLEGES_LOADED', { colleges });
+    } catch (error) {
+      return internalFailure(requestId, 'securityCollegeListRead');
+    }
+  }
+
+  async function create(authorization, body) {
+    const requestId = createRequestId();
+    const input = parseCollegeCreateBody(body);
+    if (!input) return failure('INVALID_INPUT');
+    if (!dependenciesReady) return internalFailure(requestId, 'securityCollegeCreateConfiguration');
+    const authenticated = await authenticate(authorization, requestId, 'securityCollegeCreateAuthentication');
+    if (!authenticated.ok) return authenticated.result;
+
+    const collegeId = collegeIdForName(input.name);
+    const auditId = createAuditId();
+    try {
+      const college = await db.runTransaction(async (transaction) => {
+        const existing = await findRecordById(transaction, 'colleges', collegeId);
+        if (existing) throw businessError('CONFLICT');
+        const createdCollege = {
+          _id: collegeId,
+          name: input.name,
+          status: 'active',
+          aliases: [],
+          createdAt: serverDate(),
+          updatedAt: serverDate(),
+        };
+        ensureSuccessfulInsert(await transaction.collection('colleges').add(createdCollege));
+        ensureSuccessfulInsert(await transaction.collection('audit_logs').add(createCollegeCreateAudit({
+          collegeId,
+          actorId: authenticated.user._id,
+          requestId,
+          serverDate,
+          createAuditId: () => auditId,
+        })));
+        return { collegeId, name: createdCollege.name, status: createdCollege.status };
+      });
+      return success('COLLEGE_CREATED', { college });
+    } catch (error) {
+      if (error && error.isBusinessError) return failure(error.businessCode);
+      if (isTransactionConflict(error) || isUniqueConstraintConflict(error)) return failure('CONFLICT');
+      return internalFailure(requestId, 'securityCollegeCreateTransaction', collegeId);
+    }
+  }
+
+  async function updateStatus(authorization, collegeId, body) {
+    const requestId = createRequestId();
+    const input = parseCollegeStatusBody(body);
+    if (!input || typeof collegeId !== 'string' || !collegeId || collegeId.length > MAX_COLLEGE_ID_LENGTH) {
+      return failure('INVALID_INPUT');
+    }
+    if (!dependenciesReady) return internalFailure(requestId, 'securityCollegeStatusConfiguration', collegeId || null);
+    const authenticated = await authenticate(authorization, requestId, 'securityCollegeStatusAuthentication');
+    if (!authenticated.ok) return authenticated.result;
+
+    const auditId = createAuditId();
+    try {
+      const college = await db.runTransaction(async (transaction) => {
+        const current = await findRecordById(transaction, 'colleges', collegeId);
+        if (!current) throw businessError('NOT_FOUND');
+        if (!COLLEGE_STATUSES.has(current.status) || current.status === input.status) throw businessError('CONFLICT');
+        if (input.status === 'disabled') {
+          const activeIdentityCount = countTotal(await transaction.collection('users').where({
+            role: db.command.in([...MANAGEABLE_IDENTITY_ROLES]),
+            collegeId: current._id,
+            status: 'active',
+          }).count());
+          if (activeIdentityCount === null) throw businessError('INTERNAL_ERROR');
+          if (activeIdentityCount > 0) throw businessError('COLLEGE_IN_USE');
+        }
+        const updateResult = ensureDatabaseResult(await transaction.collection('colleges').where({
+          _id: current._id,
+          status: current.status,
+        }).update({
+          status: input.status,
+          updatedAt: serverDate(),
+        }));
+        if (updatedCount(updateResult) !== 1) throw businessError('CONFLICT');
+        ensureSuccessfulInsert(await transaction.collection('audit_logs').add(createCollegeStatusAudit({
+          collegeId: current._id,
+          actorId: authenticated.user._id,
+          beforeStatus: current.status,
+          afterStatus: input.status,
+          requestId,
+          serverDate,
+          createAuditId: () => auditId,
+        })));
+        return { collegeId: current._id, name: current.name, status: input.status };
+      });
+      return success('COLLEGE_STATUS_UPDATED', { college });
+    } catch (error) {
+      if (error && error.isBusinessError) return failure(error.businessCode);
+      if (isTransactionConflict(error)) return failure('CONFLICT');
+      return internalFailure(requestId, 'securityCollegeStatusTransaction', collegeId);
+    }
+  }
+
+  return { list, create, updateStatus };
+}
+
+function createSecurityDashboardService({
+  authService,
+  db,
+  createRequestId = () => crypto.randomUUID(),
+  now = () => new Date(),
+  logger = console,
+  configured = true,
+} = {}) {
+  const dependenciesReady = configured &&
+    authService && typeof authService.authenticateSecuritySession === 'function' &&
+    db && typeof db.collection === 'function' && db.command &&
+    typeof db.command.in === 'function' && typeof db.command.gte === 'function';
+
+  function internalFailure(requestId, stage) {
+    safeLog(logger, { requestId, code: 'INTERNAL_ERROR', resourceId: null, stage });
+    return failure('INTERNAL_ERROR');
+  }
+
+  async function load(authorization) {
+    const requestId = createRequestId();
+    if (!dependenciesReady) return internalFailure(requestId, 'securityDashboardConfiguration');
+    let authenticated;
+    try {
+      authenticated = await authService.authenticateSecuritySession(authorization);
+    } catch (error) {
+      return internalFailure(requestId, 'securityDashboardAuthentication');
+    }
+    if (!authenticated.ok) return authenticated.result;
+
+    let currentTime;
+    try {
+      currentTime = now();
+      if (!(currentTime instanceof Date) || Number.isNaN(currentTime.getTime())) throw new Error('Invalid clock');
+    } catch (error) {
+      return internalFailure(requestId, 'securityDashboardClock');
+    }
+
+    try {
+      const todayStart = shanghaiDayStart(currentTime);
+      const [pendingCount, inProcessCount, closedCount, todayCount, studentCount, counselorCount, boundCount, unboundCount, activeCollegeCount, totalCollegeCount, reportsResult, alertsResult, collegesResult] = await Promise.all([
+        db.collection('fraud_reports').where({ status: 'pending_security_verify' }).count(),
+        db.collection('fraud_reports').where({ status: 'in_process' }).count(),
+        db.collection('fraud_reports').where({ status: 'closed' }).count(),
+        db.collection('fraud_reports').where({ createdAt: db.command.gte(todayStart) }).count(),
+        db.collection('users').where({ role: 'student' }).count(),
+        db.collection('users').where({ role: 'counselor' }).count(),
+        db.collection('users').where({ role: db.command.in([...MANAGEABLE_IDENTITY_ROLES]), bindStatus: 'bound' }).count(),
+        db.collection('users').where({ role: db.command.in([...MANAGEABLE_IDENTITY_ROLES]), bindStatus: 'unbound' }).count(),
+        db.collection('colleges').where({ status: 'active' }).count(),
+        db.collection('colleges').count(),
+        db.collection('fraud_reports').where({ status: db.command.in([...DASHBOARD_REPORT_STATUSES]) }).limit(DASHBOARD_LIST_READ_LIMIT).get(),
+        db.collection('alerts').orderBy('createdAt', 'desc').limit(5).get(),
+        db.collection('colleges').limit(DASHBOARD_COLLEGE_READ_LIMIT).get(),
+      ]);
+      const counts = [pendingCount, inProcessCount, closedCount, todayCount, studentCount, counselorCount, boundCount, unboundCount, activeCollegeCount, totalCollegeCount]
+        .map(countTotal);
+      if (counts.some((count) => count === null)) return internalFailure(requestId, 'securityDashboardCounts');
+      ensureDatabaseResult(reportsResult);
+      ensureDatabaseResult(alertsResult);
+      ensureDatabaseResult(collegesResult);
+      const collegeNames = new Map((Array.isArray(collegesResult.data) ? collegesResult.data : [])
+        .filter((college) => college && typeof college._id === 'string' && typeof college.name === 'string' && college.name.trim())
+        .map((college) => [college._id, college.name.trim()]));
+      const riskPriority = { high: 0, medium: 1, low: 2 };
+      const statusPriority = { pending_security_verify: 0, in_process: 1 };
+      const pendingReports = (Array.isArray(reportsResult.data) ? reportsResult.data : [])
+        .filter((report) => report && DASHBOARD_REPORT_STATUSES.has(report.status))
+        .sort((left, right) => (statusPriority[left.status] - statusPriority[right.status]) ||
+          ((riskPriority[left.riskLevel] ?? 3) - (riskPriority[right.riskLevel] ?? 3)) ||
+          (dateValue(left.createdAt) - dateValue(right.createdAt)))
+        .slice(0, 5)
+        .map((report) => toDashboardItem(report, collegeNames, 'reportId'));
+      const recentAlerts = (Array.isArray(alertsResult.data) ? alertsResult.data : [])
+        .filter(Boolean)
+        .sort((left, right) => dateValue(right.createdAt) - dateValue(left.createdAt))
+        .slice(0, 5)
+        .map((alert) => toDashboardItem(alert, collegeNames, 'alertId'));
+      return success('DASHBOARD_LOADED', {
+        metrics: {
+          pendingSecurityVerifyCount: counts[0],
+          inProcessCount: counts[1],
+          closedCount: counts[2],
+          todayNewReportCount: counts[3],
+        },
+        identitySummary: {
+          studentCount: counts[4],
+          counselorCount: counts[5],
+          boundCount: counts[6],
+          unboundCount: counts[7],
+        },
+        collegeSummary: { activeCount: counts[8], totalCount: counts[9] },
+        pendingReports,
+        recentAlerts,
+      });
+    } catch (error) {
+      return internalFailure(requestId, 'securityDashboardRead');
+    }
+  }
+
+  return { load };
+}
+
 function readHeader(headers, name) {
   if (!headers || typeof headers !== 'object') {
     return undefined;
@@ -1624,7 +1988,7 @@ function httpStatusFor(result) {
   if (result.code === 'NOT_FOUND') {
     return 404;
   }
-  if (result.code === 'CONFLICT') {
+  if (result.code === 'CONFLICT' || result.code === 'COLLEGE_IN_USE') {
     return 409;
   }
   return 500;
@@ -1663,12 +2027,19 @@ function getIdentityStatusUserId(path) {
   return match ? match[1] : null;
 }
 
+function getCollegeStatusId(path) {
+  const match = /^\/colleges\/([^/]+)\/status$/.exec(path);
+  return match ? match[1] : null;
+}
+
 function createHttpHandler({
   authService,
   alertService = null,
   reportProcessingService = null,
   reportClosingService = null,
   identityManagementService = null,
+  collegeManagementService = null,
+  dashboardService = null,
   allowedOrigins,
   logger = console,
 }) {
@@ -1683,13 +2054,18 @@ function createHttpHandler({
     if (method === 'OPTIONS') {
       const identityUnbindUserId = getIdentityUnbindUserId(path);
       const identityStatusUserId = getIdentityStatusUserId(path);
+      const collegeStatusId = getCollegeStatusId(path);
       const allowedMethods = path === '/login'
         ? 'POST, OPTIONS'
         : path === '/session'
           ? 'GET, OPTIONS'
           : path === '/identities'
             ? 'GET, POST, OPTIONS'
-            : (identityUnbindUserId || identityStatusUserId || path === '/alerts' || getAlertDispatchId(path) || getReportStartProcessId(path) || getReportCloseId(path))
+            : path === '/colleges'
+              ? 'GET, POST, OPTIONS'
+              : (path === '/dashboard')
+                ? 'GET, OPTIONS'
+            : (identityUnbindUserId || identityStatusUserId || collegeStatusId || path === '/alerts' || getAlertDispatchId(path) || getReportStartProcessId(path) || getReportCloseId(path))
             ? 'POST, OPTIONS'
             : null;
       if (!allowedMethods) {
@@ -1708,6 +2084,42 @@ function createHttpHandler({
       }
       if (method === 'GET' && path === '/session') {
         return httpResponse(await authService.session(readHeader(event && event.headers, 'authorization')), buildResponseHeaders(origin, originWhitelist));
+      }
+      if (method === 'GET' && path === '/dashboard') {
+        if (!dashboardService || typeof dashboardService.load !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await dashboardService.load(
+          readHeader(event && event.headers, 'authorization'),
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      if (method === 'GET' && path === '/colleges') {
+        if (!collegeManagementService || typeof collegeManagementService.list !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await collegeManagementService.list(
+          readHeader(event && event.headers, 'authorization'),
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      if (method === 'POST' && path === '/colleges') {
+        if (!collegeManagementService || typeof collegeManagementService.create !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await collegeManagementService.create(
+          readHeader(event && event.headers, 'authorization'),
+          event && event.body,
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      const collegeStatusId = getCollegeStatusId(path);
+      if (method === 'POST' && collegeStatusId) {
+        if (!collegeManagementService || typeof collegeManagementService.updateStatus !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await collegeManagementService.updateStatus(
+          readHeader(event && event.headers, 'authorization'),
+          collegeStatusId,
+          event && event.body,
+        ), buildResponseHeaders(origin, originWhitelist));
       }
       if (method === 'GET' && path === '/identities') {
         if (!identityManagementService || typeof identityManagementService.list !== 'function') {
@@ -1880,12 +2292,27 @@ function createDefaultHandler(options = {}) {
       logger,
       configured: dependencies.configured,
     });
+    const collegeManagementService = createSecurityCollegeManagementService({
+      authService,
+      db: dependencies.db,
+      serverDate: dependencies.serverDate,
+      logger,
+      configured: dependencies.configured,
+    });
+    const dashboardService = createSecurityDashboardService({
+      authService,
+      db: dependencies.db,
+      logger,
+      configured: dependencies.configured,
+    });
     return createHttpHandler({
       authService,
       alertService,
       reportProcessingService,
       reportClosingService,
       identityManagementService,
+      collegeManagementService,
+      dashboardService,
       allowedOrigins: environment.SECURITY_WEB_ALLOWED_ORIGINS,
       logger,
     });
@@ -1959,6 +2386,8 @@ exports.__testables = {
   createDefaultHandler,
   createHttpHandler,
   createSecurityAlertService,
+  createSecurityCollegeManagementService,
+  createSecurityDashboardService,
   createSecurityIdentityManagementService,
   createSecurityReportClosingService,
   createSecurityReportProcessingService,
@@ -1967,6 +2396,7 @@ exports.__testables = {
   createReportCloseAudit,
   createReportStartProcessAudit,
   getAlertDispatchId,
+  getCollegeStatusId,
   getIdentityStatusUserId,
   getIdentityUnbindUserId,
   getReportCloseId,
@@ -1976,6 +2406,8 @@ exports.__testables = {
   normalizeLoginName,
   parseAlertCreateBody,
   parseAlertDispatchBody,
+  parseCollegeCreateBody,
+  parseCollegeStatusBody,
   parseIdentityCreateBody,
   parseIdentityStatusBody,
   parseIdentityUnbindBody,
@@ -1983,6 +2415,8 @@ exports.__testables = {
   parseReportStartProcessBody,
   parseAllowedOrigins,
   parseLoginBody,
+  collegeIdForName,
+  shanghaiDayStart,
   maskIdentityNo,
   verifySessionToken,
 };

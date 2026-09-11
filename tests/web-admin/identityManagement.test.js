@@ -8,12 +8,13 @@ const test = require('node:test');
 const appSource = fs.readFileSync(path.join(__dirname, '../../web-admin/src/App.vue'), 'utf8');
 const styleSource = fs.readFileSync(path.join(__dirname, '../../web-admin/src/style.css'), 'utf8');
 
-test('1. Web 后台包含可扩展左侧导航及身份管理入口', () => {
-  for (const label of ['工作台', '预警管理', '工单管理', '身份管理']) {
+test('1. Web 后台包含工作台、身份管理和学院管理导航', () => {
+  for (const label of ['工作台', '预警管理', '工单管理', '身份管理', '学院管理']) {
     assert.match(appSource, new RegExp(`>${label}<`));
   }
   assert.match(appSource, /功能完善中/);
-  assert.match(appSource, /欢迎回来/);
+  assert.match(appSource, /保卫处工作台/);
+  assert.match(appSource, /校园反诈业务概览/);
   assert.match(styleSource, /\.sidebar\s*\{/);
   assert.match(styleSource, /\.side-nav\s*\{/);
 });
@@ -49,4 +50,30 @@ test('4. unbind/status 均携带当前 version，成功后重新加载服务端�
 test('5. TOKEN 失效继续复用既有清 session 逻辑', () => {
   assert.match(appSource, /const TOKEN_ERROR_CODES = new Set\(\["TOKEN_MISSING", "TOKEN_INVALID", "TOKEN_EXPIRED"\]\)/);
   assert.match(appSource, /if \(TOKEN_ERROR_CODES\.has\(code\)\) \{\s*clearSession\(\);/);
+});
+
+test('6. 工作台通过 dashboard 接口显示真实指标与安全列表字段', () => {
+  assert.match(appSource, /fetch\(`\$\{apiBaseUrl\}\/dashboard`/);
+  for (const label of ['待保卫处核验', '处理中', '已结案', '今日新增', '待办工单', '最新预警', '人员与学院概览', '快捷操作']) {
+    assert.match(appSource, new RegExp(label));
+  }
+  for (const forbidden of ['studentId', 'sourceReference', 'incidentNarrative', 'contactPhone', 'actionContent']) {
+    assert.doesNotMatch(appSource, new RegExp(`(?:report|alert)\\.${forbidden}`), forbidden);
+  }
+  assert.doesNotMatch(appSource, /pendingSecurityVerifyCount:\s*\d+/);
+});
+
+test('7. 学院管理只调用受保护接口，新增表单不暴露学院编号', () => {
+  assert.match(appSource, /fetch\(`\$\{apiBaseUrl\}\/colleges`/);
+  assert.match(appSource, /\/colleges\/\$\{encodeURIComponent\(college\.collegeId\)\}\/status/);
+  assert.match(appSource, /该学院仍有正常使用中的学生或辅导员身份，请先停用相关身份。/);
+  assert.match(appSource, /body:\s*JSON\.stringify\(\{ name \}\)/);
+  assert.doesNotMatch(appSource, /v-model="collegeId"/);
+  assert.doesNotMatch(appSource, /college\.(?:wxOpenId|wxIdentityKey|passwordHash|identityKey)/);
+});
+
+test('8. 新增学院后进入身份管理并重新加载 active 学院下拉选项', () => {
+  assert.match(appSource, /activeView\.value = "identities"/);
+  assert.match(appSource, /await loadIdentities\(\)/);
+  assert.match(appSource, /colleges\.value = payload\.colleges\.map/);
 });

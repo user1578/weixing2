@@ -28,6 +28,7 @@ function baseUser(overrides = {}) {
 function createMockDb(users = [], options = {}) {
   const state = {
     users: users.map((user) => ({ ...user })),
+    colleges: (options.colleges || []).map((college) => ({ ...college })),
     audits: [],
     transactionCalls: 0,
     conditionalUpdates: [],
@@ -42,7 +43,8 @@ function createMockDb(users = [], options = {}) {
           return {
             async get() {
               state.queries.push({ collection, query: { ...query } });
-              const documents = collection === 'users' ? state.users.filter((user) => matches(user, query)).map(clone) : [];
+              const source = collection === 'users' ? state.users : collection === 'colleges' ? state.colleges : [];
+              const documents = source.filter((document) => matches(document, query)).map(clone);
               return { data: documents.slice(0, 1) };
             },
           };
@@ -66,9 +68,11 @@ function createMockDb(users = [], options = {}) {
     doc(id) {
       return {
         async get() {
-          const document = transaction && options.transactionReadUser && options.transactionReadUser._id === id
-            ? options.transactionReadUser
-            : state.users.find((user) => user._id === id);
+          const document = collection === 'colleges'
+            ? state.colleges.find((college) => college._id === id)
+            : transaction && options.transactionReadUser && options.transactionReadUser._id === id
+              ? options.transactionReadUser
+              : state.users.find((user) => user._id === id);
           return { data: clone(document) };
         },
         async update({ data }) {
@@ -743,4 +747,29 @@ test('69. 其他未知或伪造顶层字段仍被拒绝并记录脱敏诊断', a
   }]);
   assert.equal(state.transactionCalls, 0);
   assert.equal(state.audits.length, 0);
+});
+
+test('70. 已绑定学生或辅导员的 profile 使用服务端 colleges 中的真实学院名称', async () => {
+  const user = baseUser({ wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound', collegeId: 'college_new' });
+  const { handler } = makeSession([user], trustedContext, {
+    colleges: [{ _id: 'college_new', name: '新成立学院', status: 'active' }],
+  });
+  const response = await handler();
+
+  assert.equal(response.code, 'BOUND');
+  assert.equal(response.profile.collegeId, 'college_new');
+  assert.equal(response.profile.collegeName, '新成立学院');
+});
+
+test('71. security 不读取或返回伪造学院名称，学院不存在时不信任客户端数据', async () => {
+  const security = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound', collegeId: 'college_attacker', collegeName: '伪造学院' });
+  const securityRun = makeSession([security], trustedContext, { colleges: [{ _id: 'college_attacker', name: '真实学院' }] });
+  assert.equal((await securityRun.handler()).code, 'FORBIDDEN');
+  assert.equal(securityRun.state.queries.some((query) => query.collection === 'colleges'), false);
+
+  const student = baseUser({ wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound', collegeName: '客户端伪造名称' });
+  const studentRun = makeSession([student], trustedContext);
+  const response = await studentRun.handler();
+  assert.equal(response.code, 'BOUND');
+  assert.equal(Object.hasOwn(response.profile, 'collegeName'), false);
 });
