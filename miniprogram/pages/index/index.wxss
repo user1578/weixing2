@@ -207,19 +207,22 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
+  align-items: stretch;
 }
 
-.counselor_feature_grid {
+.feature_slot {
+  box-sizing: border-box;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
+  width: 48.5%;
+  margin-bottom: 18rpx;
 }
 
 .feature_card {
   box-sizing: border-box;
-  width: 48.5%;
-  min-height: 224rpx;
-  margin: 0 0 18rpx;
+  width: 100%;
+  height: 100%;
+  min-height: 200rpx;
+  margin: 0;
   padding: 24rpx;
   overflow: hidden;
   border: 1rpx solid #e4ebf5;
@@ -228,6 +231,10 @@
   color: #17233d;
   text-align: left;
   box-shadow: 0 6rpx 18rpx rgba(30, 41, 59, 0.045);
+}
+
+.feature_card::after {
+  border: 0;
 }
 
 .blue_feature {
@@ -240,11 +247,6 @@
   background: #eaf2ff;
   color: #1e3a8a;
   box-shadow: 0 8rpx 20rpx rgba(37, 99, 235, 0.1);
-}
-
-.counselor_card {
-  width: 48.5%;
-  min-height: 214rpx;
 }
 
 .counselor_pending_feature {

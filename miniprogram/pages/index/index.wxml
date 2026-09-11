@@ -56,26 +56,34 @@
         <view class="section_note">学生安全服务</view>
       </view>
       <view class="feature_grid">
-        <button class="feature_card blue_feature" bindtap="goToStudentAlerts">
-          <view class="feature_top"><view class="feature_icon">提醒</view><view class="feature_badge" wx:if="{{studentSummary.pendingAlertCount}}">{{studentSummary.pendingAlertCount}}</view></view>
-          <view class="feature_title">风险提醒</view>
-          <view class="feature_text">查看需要关注的安全提醒</view>
-        </button>
-        <button class="feature_card primary_feature" bindtap="goToStudentReport">
-          <view class="feature_top"><view class="feature_icon">上报</view></view>
-          <view class="feature_title">我要上报</view>
-          <view class="feature_text">提交线索，获取后续协助</view>
-        </button>
-        <button class="feature_card" bindtap="showUnavailable">
-          <view class="feature_top"><view class="feature_icon">工单</view><view class="feature_status">{{studentStatusPreview}}</view></view>
-          <view class="feature_title">我的工单</view>
-          <view class="feature_text">现有服务暂未提供工单列表入口</view>
-        </button>
-        <button class="feature_card" bindtap="showUnavailable">
-          <view class="feature_top"><view class="feature_icon">学习</view></view>
-          <view class="feature_title">安全学习</view>
-          <view class="feature_text">持续学习常见诈骗防范知识</view>
-        </button>
+        <view class="feature_slot">
+          <button class="feature_card blue_feature" bindtap="goToStudentAlerts">
+            <view class="feature_top"><view class="feature_icon">提醒</view><view class="feature_badge" wx:if="{{studentSummary.pendingAlertCount}}">{{studentSummary.pendingAlertCount}}</view></view>
+            <view class="feature_title">风险提醒</view>
+            <view class="feature_text">查看需要关注的安全提醒</view>
+          </button>
+        </view>
+        <view class="feature_slot">
+          <button class="feature_card primary_feature" bindtap="goToStudentReport">
+            <view class="feature_top"><view class="feature_icon">上报</view></view>
+            <view class="feature_title">我要上报</view>
+            <view class="feature_text">提交线索，获取后续协助</view>
+          </button>
+        </view>
+        <view class="feature_slot">
+          <button class="feature_card" bindtap="showUnavailable">
+            <view class="feature_top"><view class="feature_icon">工单</view><view class="feature_status">{{studentStatusPreview}}</view></view>
+            <view class="feature_title">我的工单</view>
+            <view class="feature_text">现有服务暂未提供工单列表入口</view>
+          </button>
+        </view>
+        <view class="feature_slot">
+          <button class="feature_card" bindtap="showUnavailable">
+            <view class="feature_top"><view class="feature_icon">学习</view></view>
+            <view class="feature_title">安全学习</view>
+            <view class="feature_text">持续学习常见诈骗防范知识</view>
+          </button>
+        </view>
       </view>
     </block>
 
@@ -113,26 +121,34 @@
         <view class="section_note">按权限加载学院数据</view>
       </view>
       <view class="feature_grid counselor_feature_grid">
-        <button class="feature_card counselor_card counselor_pending_feature" bindtap="goToCounselorReports">
-          <view class="feature_top"><view class="feature_icon">待办</view></view>
-          <view class="feature_title">待核验工单</view>
-          <view class="feature_text">当前 {{counselorSummary.pendingVerifyCount}} 项待处理工单</view>
-        </button>
-        <button class="feature_card counselor_card" bindtap="showUnavailable">
-          <view class="feature_top"><view class="feature_icon">处理中</view></view>
-          <view class="feature_title">跟进处理中</view>
-          <view class="feature_text">现有聚合数据暂未提供</view>
-        </button>
-        <button class="feature_card counselor_card counselor_focus_feature" bindtap="goToCounselorReports">
-          <view class="feature_top"><view class="feature_icon">重点关注</view></view>
-          <view class="feature_title">重点关注</view>
-          <view class="feature_text">高风险 {{counselorSummary.highRiskCount}} 项优先核验</view>
-        </button>
-        <button class="feature_card counselor_card" bindtap="showUnavailable">
-          <view class="feature_top"><view class="feature_icon">记录</view></view>
-          <view class="feature_title">工单记录</view>
-          <view class="feature_text">已转交与历史记录暂未聚合</view>
-        </button>
+        <view class="feature_slot">
+          <button class="feature_card counselor_card counselor_pending_feature" bindtap="goToCounselorReports">
+            <view class="feature_top"><view class="feature_icon">待办</view></view>
+            <view class="feature_title">待核验工单</view>
+            <view class="feature_text">当前 {{counselorSummary.pendingVerifyCount}} 项待处理工单</view>
+          </button>
+        </view>
+        <view class="feature_slot">
+          <button class="feature_card counselor_card" bindtap="showUnavailable">
+            <view class="feature_top"><view class="feature_icon">处理中</view></view>
+            <view class="feature_title">跟进处理中</view>
+            <view class="feature_text">现有聚合数据暂未提供</view>
+          </button>
+        </view>
+        <view class="feature_slot">
+          <button class="feature_card counselor_card counselor_focus_feature" bindtap="goToCounselorReports">
+            <view class="feature_top"><view class="feature_icon">重点关注</view></view>
+            <view class="feature_title">重点关注</view>
+            <view class="feature_text">高风险 {{counselorSummary.highRiskCount}} 项优先核验</view>
+          </button>
+        </view>
+        <view class="feature_slot">
+          <button class="feature_card counselor_card" bindtap="showUnavailable">
+            <view class="feature_top"><view class="feature_icon">记录</view></view>
+            <view class="feature_title">工单记录</view>
+            <view class="feature_text">已转交与历史记录暂未聚合</view>
+          </button>
+        </view>
       </view>
     </block>
   </view>

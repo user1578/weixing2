@@ -164,7 +164,14 @@ test('11. 辅导员工单页复用既有云函数并只展示安全的列表字�
 test('12. 自适应工作台 CSS 使用可换行双列和全宽约束，不设置横向固定页面宽度', () => {
   const css = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxss'), 'utf8');
   assert.match(css, /\.feature_grid\s*\{[\s\S]*flex-wrap:\s*wrap/);
-  assert.match(css, /\.feature_card\s*\{[\s\S]*width:\s*48\.5%/);
+  assert.match(css, /\.feature_grid\s*\{[\s\S]*align-items:\s*stretch/);
+  assert.match(css, /\.feature_slot\s*\{[\s\S]*box-sizing:\s*border-box/);
+  assert.match(css, /\.feature_slot\s*\{[\s\S]*width:\s*48\.5%/);
+  assert.match(css, /\.feature_slot\s*\{[\s\S]*margin-bottom:\s*18rpx/);
+  assert.match(css, /\.feature_card\s*\{[\s\S]*width:\s*100%/);
+  assert.match(css, /\.feature_card\s*\{[\s\S]*height:\s*100%/);
+  assert.match(css, /\.feature_card\s*\{[\s\S]*margin:\s*0/);
+  assert.doesNotMatch(css, /\.feature_card\s*\{[\s\S]*width:\s*48\.5%/);
   assert.match(css, /\.wide_metric\s*\{[\s\S]*width:\s*100%/);
   assert.match(css, /\.hello_title\s*\{[\s\S]*overflow-wrap:\s*anywhere/);
   assert.match(css, /\.hello_subtitle\s*\{[\s\S]*word-break:\s*break-all/);
@@ -178,7 +185,10 @@ test('13. 375、390、430 宽度均由百分比卡片和盒模型约束，避免
     assert.equal(viewport >= 375, true);
     assert.match(workbenchCss, /\.page\s*\{[\s\S]*box-sizing:\s*border-box/);
     assert.match(workbenchCss, /\.feature_grid\s*\{[\s\S]*flex-wrap:\s*wrap/);
-    assert.match(workbenchCss, /\.feature_card\s*\{[\s\S]*width:\s*48\.5%/);
+    assert.match(workbenchCss, /\.feature_slot\s*\{[\s\S]*width:\s*48\.5%/);
+    assert.match(workbenchCss, /\.feature_card\s*\{[\s\S]*width:\s*100%/);
+    assert.match(workbenchCss, /\.feature_card\s*\{[\s\S]*margin:\s*0/);
+    assert.equal(viewport * 0.485 * 2 < viewport, true);
     assert.match(bindingCss, /\.page\s*\{[\s\S]*box-sizing:\s*border-box/);
     assert.match(bindingCss, /\.card\s*\{[\s\S]*width:\s*100%/);
     assert.match(bindingCss, /\.input\s*\{[\s\S]*width:\s*100%/);
@@ -243,8 +253,8 @@ test('17. 辅导员工单入口采用浅蓝待办、白底常规、浅红重点�
 
   assert.match(wxml, /feature_grid counselor_feature_grid/);
   assert.equal((wxml.match(/feature_card counselor_card/g) || []).length, 4);
-  assert.match(css, /\.counselor_card\s*\{[\s\S]*width:\s*48\.5%/);
-  assert.match(css, /\.counselor_card\s*\{[\s\S]*min-height:\s*214rpx/);
+  assert.match(css, /\.feature_slot\s*\{[\s\S]*width:\s*48\.5%/);
+  assert.match(css, /\.feature_card\s*\{[\s\S]*min-height:\s*200rpx/);
   assert.match(pendingBlock, /background:\s*#eaf2ff/i);
   assert.match(pendingBlock, /border-color:\s*#cfe0ff/i);
   assert.doesNotMatch(pendingBlock, /#2563eb/i);
@@ -255,4 +265,35 @@ test('17. 辅导员工单入口采用浅蓝待办、白底常规、浅红重点�
   assert.doesNotMatch(counselorCss, /(^|\n)page\s*\{/);
   assert.doesNotMatch(css, /\[[^\]]+\]/);
   assert.doesNotMatch(counselorCss, /\[[^\]]+\]/);
+});
+
+test('18. 学生和辅导员四张入口均由 feature_slot 承担双列 flex 子项', () => {
+  const wxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxml'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxss'), 'utf8');
+  const counselorStart = wxml.indexOf('<view class="feature_grid counselor_feature_grid">');
+  const studentStart = wxml.indexOf('<view class="feature_grid">');
+  const studentMarkup = wxml.slice(studentStart, counselorStart);
+  const counselorMarkup = wxml.slice(counselorStart);
+  const slotPattern = /<view class="feature_slot">\s*<button class="feature_card\b[\s\S]*?<\/button>\s*<\/view>/g;
+  const studentSlots = studentMarkup.match(slotPattern) || [];
+  const counselorSlots = counselorMarkup.match(slotPattern) || [];
+
+  assert.equal(studentSlots.length, 4);
+  assert.equal(counselorSlots.length, 4);
+  for (const label of ['风险提醒', '我要上报', '我的工单', '安全学习']) {
+    assert.equal(studentSlots.some((slot) => slot.includes(label)), true, label);
+  }
+  for (const label of ['待核验工单', '跟进处理中', '重点关注', '工单记录']) {
+    assert.equal(counselorSlots.some((slot) => slot.includes(label)), true, label);
+  }
+  assert.doesNotMatch(studentMarkup, /<view class="feature_grid">\s*<button/);
+  assert.doesNotMatch(counselorMarkup, /<view class="feature_grid counselor_feature_grid">\s*<button/);
+  assert.match(css, /\.feature_card::after\s*\{\s*border:\s*0/);
+
+  const selectors = [...css.matchAll(/(?:^|\})\s*([^{}]+?)\s*\{/g)]
+    .flatMap((match) => match[1].split(','))
+    .map((selector) => selector.trim());
+  for (const selector of selectors) {
+    assert.match(selector, /^\.[a-z_][a-z0-9_-]*(?:::[a-z-]+)?(?:\s+\.[a-z_][a-z0-9_-]*(?:::[a-z-]+)?)*$/i, selector);
+  }
 });
