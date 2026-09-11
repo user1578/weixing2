@@ -32,8 +32,14 @@ const pageDefinition = {
 
   onFieldInput(event) {
     const field = event && event.currentTarget && event.currentTarget.dataset && event.currentTarget.dataset.field;
-    if (field !== "identityNo" && field !== "name") return;
-    this.setData({ [field]: event.detail.value });
+    const value = event && event.detail ? event.detail.value : "";
+    if (field === "identityNo") {
+      this.setData({ identityNo: value });
+      return;
+    }
+    if (field === "name") {
+      this.setData({ name: value });
+    }
   },
 
   async submitBinding() {

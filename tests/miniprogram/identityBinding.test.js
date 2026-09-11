@@ -28,6 +28,21 @@ test('1. 绑定请求仅包含 identityNo 和 name，并去除首尾空白', () 
   assert.equal(bindingPage.buildBindingData('20230001', ' '), null);
 });
 
+test('1a. 输入处理仅通过显式字段分支更新 identityNo 或 name', () => {
+  const instance = createPageInstance(bindingPage.pageDefinition, { identityNo: '旧编号', name: '旧姓名' });
+  instance.onFieldInput({ currentTarget: { dataset: { field: 'identityNo' } }, detail: { value: '20230001' } });
+  assert.equal(instance.data.identityNo, '20230001');
+  assert.equal(instance.data.name, '旧姓名');
+
+  instance.onFieldInput({ currentTarget: { dataset: { field: 'name' } }, detail: { value: '张三' } });
+  assert.equal(instance.data.name, '张三');
+
+  instance.onFieldInput({ currentTarget: { dataset: { field: 'role' } }, detail: { value: 'counselor' } });
+  assert.deepEqual(instance.data, {
+    identityNo: '20230001', name: '张三', submitting: false, errorMessage: '',
+  });
+});
+
 test('2. 绑定页不提交角色且成功后返回工作台', async () => {
   const calls = [];
   const relaunches = [];
@@ -56,4 +71,10 @@ test('3. 绑定页不含角色选择器或角色字段', () => {
   assert.equal(wxml.includes('picker'), false);
   assert.equal(wxml.includes('学生'), false);
   assert.equal(wxml.includes('辅导员'), false);
+});
+
+test('4. 绑定页不再使用计算属性 setData，也不引入 Babel runtime', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/bind/index.js'), 'utf8');
+  assert.doesNotMatch(source, /\{\s*\[\s*field\s*\]\s*:/);
+  assert.doesNotMatch(source, /@babel\/runtime/);
 });
