@@ -1,6 +1,7 @@
 {
   "pages": [
     "pages/index/index",
+    "pages/bind/index",
     "pages/alerts/index/index",
     "pages/alerts/detail/index",
     "pages/reports/create/index",

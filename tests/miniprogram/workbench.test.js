@@ -16,13 +16,6 @@ const STUDENT = {
 const COUNSELOR = {
   userId: 'usr_counselor_001', role: 'counselor', name: '辅导员乙', collegeId: 'college_cs', focusFlag: false,
 };
-const DEMO_STUDENT = {
-  userId: 'usr_student_demo_001', role: 'student', name: '演示学生', collegeId: 'college_cs', focusFlag: false,
-};
-const DEMO_COUNSELOR = {
-  userId: 'usr_counselor_demo_001', role: 'counselor', name: '演示辅导员', collegeId: 'college_cs', focusFlag: true,
-};
-
 function createPageInstance(definition, data = {}) {
   const instance = {
     ...definition,
@@ -34,7 +27,7 @@ function createPageInstance(definition, data = {}) {
   return instance;
 }
 
-function createWx({ sessions = [], switches = [], studentAlerts = [], counselorReportLists = [] } = {}) {
+function createWx({ sessions = [], studentAlerts = [], counselorReportLists = [] } = {}) {
   const calls = [];
   const toasts = [];
   const navigations = [];
@@ -46,7 +39,6 @@ function createWx({ sessions = [], switches = [], studentAlerts = [], counselorR
       async callFunction(request) {
         calls.push(request);
         if (request.name === 'getMiniProgramSession') return { result: sessions.shift() || { ok: false, code: 'INTERNAL_ERROR' } };
-        if (request.name === 'switchDemoMiniProgramIdentity') return { result: switches.shift() || { ok: false, code: 'SWITCH_DISABLED' } };
         if (request.name === 'getStudentAlerts') return { result: studentAlerts.shift() || { ok: true, alerts: [] } };
         if (request.name === 'getCounselorReports') return { result: counselorReportLists.shift() || { ok: true, reports: [] } };
         throw new Error(`Unexpected function: ${request.name}`);
@@ -76,7 +68,6 @@ test('1. 学生工作台只使用可信 session，并由已加载预警计算风
     highRiskCount: 1, pendingAlertCount: 2, followingAlertCount: 1,
     reportCountText: '—', reportHint: '现有服务暂未提供我的工单汇总',
   });
-  assert.equal(instance.data.demoSwitchAvailable, false);
   assert.deepEqual(global.wx.calls.map((call) => call.name).sort(), ['getMiniProgramSession', 'getStudentAlerts']);
 });
 
@@ -100,118 +91,23 @@ test('2. 辅导员工作台只调用既有学院工单查询，并计算待核�
   assert.equal(global.wx.calls.some((call) => call.name === 'getCounselorReports'), true);
 });
 
-test('3. demo 入口仅在固定 demo 身份通过同角色 ALREADY_ACTIVE 验证后显示', async () => {
-  global.wx = createWx({
-    sessions: [{ ok: true, code: 'BOUND', profile: DEMO_STUDENT }],
-    switches: [{ ok: true, code: 'ALREADY_ACTIVE', profile: DEMO_STUDENT }],
-    studentAlerts: [{ ok: true, alerts: [] }],
-  });
-  const instance = createPageInstance(workbench.pageDefinition);
-  await instance.refreshSession();
-
-  const probe = global.wx.calls.find((call) => call.name === 'switchDemoMiniProgramIdentity');
-  assert.equal(instance.data.demoSwitchAvailable, true);
-  assert.deepEqual(probe.data, { targetRole: 'student' });
-  assert.deepEqual(Object.keys(probe.data), ['targetRole']);
-  assert.equal(workbench.isSwitchTarget('security'), false);
-  assert.equal(workbench.isDemoIdentityCandidate({ ...DEMO_STUDENT, collegeId: 'college_other' }), false);
+test('3. 小程序工作台源码不保留身份切换入口或云函数调用', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.js'), 'utf8');
+  const wxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxml'), 'utf8');
+  assert.equal(source.includes('switchDemoMiniProgramIdentity'), false);
+  assert.equal(source.includes('identitySwitch'), false);
+  assert.equal(wxml.includes('切换身份'), false);
+  assert.equal(wxml.includes('data-target-role'), false);
 });
 
-test('4. 正式模式或未启用 demo 时不显示切换入口', async () => {
-  global.wx = createWx({
-    sessions: [{ ok: true, code: 'BOUND', profile: DEMO_STUDENT }],
-    switches: [{ ok: false, code: 'SWITCH_DISABLED' }],
-    studentAlerts: [{ ok: true, alerts: [] }],
-  });
+test('4. security 会话不渲染工作台，也不加载学生或辅导员数据', async () => {
+  global.wx = createWx({ sessions: [{ ok: false, code: 'FORBIDDEN' }] });
   const instance = createPageInstance(workbench.pageDefinition);
-  await instance.refreshSession();
+  const loaded = await instance.refreshSession();
 
-  assert.equal(instance.data.demoSwitchAvailable, false);
-  assert.equal(instance.data.switchSheetVisible, false);
-});
-
-test('5. 学生切换到辅导员后必须重新读取真实 session 才切换工作台', async () => {
-  global.wx = createWx({
-    sessions: [
-      { ok: true, code: 'BOUND', profile: DEMO_STUDENT },
-      { ok: true, code: 'BOUND', profile: DEMO_COUNSELOR },
-    ],
-    switches: [
-      { ok: true, code: 'ALREADY_ACTIVE' },
-      { ok: true, code: 'IDENTITY_SWITCHED', profile: DEMO_COUNSELOR },
-      { ok: true, code: 'ALREADY_ACTIVE' },
-    ],
-    studentAlerts: [{ ok: true, alerts: [] }],
-    counselorReportLists: [{ ok: true, reports: [] }],
-  });
-  const instance = createPageInstance(workbench.pageDefinition);
-  await instance.refreshSession();
-  await instance.switchDemoIdentity({ currentTarget: { dataset: { targetRole: 'counselor' } } });
-
-  const switchCalls = global.wx.calls.filter((call) => call.name === 'switchDemoMiniProgramIdentity');
-  assert.equal(instance.data.profile.role, 'counselor');
-  assert.equal(global.wx.calls.filter((call) => call.name === 'getMiniProgramSession').length, 2);
-  assert.deepEqual(switchCalls[1].data, { targetRole: 'counselor' });
-  assert.equal(global.wx.toasts.at(-1).title, '身份切换成功');
-});
-
-test('6. 辅导员切换到学生后必须重新读取真实 session 才切换工作台', async () => {
-  global.wx = createWx({
-    sessions: [
-      { ok: true, code: 'BOUND', profile: DEMO_COUNSELOR },
-      { ok: true, code: 'BOUND', profile: DEMO_STUDENT },
-    ],
-    switches: [
-      { ok: true, code: 'ALREADY_ACTIVE' },
-      { ok: true, code: 'IDENTITY_SWITCHED', profile: DEMO_STUDENT },
-      { ok: true, code: 'ALREADY_ACTIVE' },
-    ],
-    counselorReportLists: [{ ok: true, reports: [] }],
-    studentAlerts: [{ ok: true, alerts: [] }],
-  });
-  const instance = createPageInstance(workbench.pageDefinition);
-  await instance.refreshSession();
-  await instance.switchDemoIdentity({ currentTarget: { dataset: { targetRole: 'student' } } });
-
-  assert.equal(instance.data.profile.role, 'student');
-  assert.equal(global.wx.calls.filter((call) => call.name === 'getMiniProgramSession').length, 2);
-});
-
-test('7. 后端切换明确失败时保留当前已确认 session，不乐观篡改角色', async () => {
-  global.wx = createWx({
-    sessions: [{ ok: true, code: 'BOUND', profile: DEMO_STUDENT }],
-    switches: [{ ok: true, code: 'ALREADY_ACTIVE' }, { ok: false, code: 'FORBIDDEN' }],
-    studentAlerts: [{ ok: true, alerts: [] }],
-  });
-  const instance = createPageInstance(workbench.pageDefinition);
-  await instance.refreshSession();
-  const before = structuredClone(instance.data.profile);
-  await instance.switchDemoIdentity({ currentTarget: { dataset: { targetRole: 'counselor' } } });
-
-  assert.deepEqual(instance.data.profile, before);
-  assert.equal(global.wx.calls.filter((call) => call.name === 'getMiniProgramSession').length, 1);
-  assert.equal(global.wx.toasts.at(-1).title, '当前身份不允许演示切换。');
-});
-
-test('8. 切换成功但重取 session 未确认目标角色时不伪造目标工作台', async () => {
-  global.wx = createWx({
-    sessions: [
-      { ok: true, code: 'BOUND', profile: DEMO_STUDENT },
-      { ok: true, code: 'BOUND', profile: DEMO_STUDENT },
-    ],
-    switches: [
-      { ok: true, code: 'ALREADY_ACTIVE' },
-      { ok: true, code: 'IDENTITY_SWITCHED' },
-      { ok: true, code: 'ALREADY_ACTIVE' },
-    ],
-    studentAlerts: [{ ok: true, alerts: [] }, { ok: true, alerts: [] }],
-  });
-  const instance = createPageInstance(workbench.pageDefinition);
-  await instance.refreshSession();
-  await instance.switchDemoIdentity({ currentTarget: { dataset: { targetRole: 'counselor' } } });
-
-  assert.equal(instance.data.profile.role, 'student');
-  assert.equal(global.wx.toasts.at(-1).title, '身份更新未确认，请重新进入工作台');
+  assert.equal(loaded, false);
+  assert.equal(instance.data.profile, null);
+  assert.deepEqual(global.wx.calls.map((call) => call.name), ['getMiniProgramSession']);
 });
 
 test('9. 学生和辅导员入口只在当前角色匹配时导航到既有页面', () => {
@@ -275,7 +171,22 @@ test('12. 自适应工作台 CSS 使用可换行双列和全宽约束，不设�
   assert.equal(/width:\s*(?:3\d{2}|[4-9]\d{2})rpx/.test(css), false);
 });
 
-test('13. 工作台不保留可输入的绑定或身份伪造入口', () => {
+test('13. 375、390、430 宽度均由百分比卡片和盒模型约束，避免横向溢出', () => {
+  const workbenchCss = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxss'), 'utf8');
+  const bindingCss = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/bind/index.wxss'), 'utf8');
+  for (const viewport of [375, 390, 430]) {
+    assert.equal(viewport >= 375, true);
+    assert.match(workbenchCss, /\.page\s*\{[\s\S]*box-sizing:\s*border-box/);
+    assert.match(workbenchCss, /\.feature_grid\s*\{[\s\S]*flex-wrap:\s*wrap/);
+    assert.match(workbenchCss, /\.feature_card\s*\{[\s\S]*width:\s*48\.5%/);
+    assert.match(bindingCss, /\.page\s*\{[\s\S]*box-sizing:\s*border-box/);
+    assert.match(bindingCss, /\.card\s*\{[\s\S]*width:\s*100%/);
+    assert.match(bindingCss, /\.input\s*\{[\s\S]*width:\s*100%/);
+  }
+  assert.equal(/width:\s*(?:3\d{2}|[4-9]\d{2})rpx/.test(`${workbenchCss}\n${bindingCss}`), false);
+});
+
+test('14. 工作台不保留可输入的绑定或身份伪造入口', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.js'), 'utf8');
   const wxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxml'), 'utf8');
   assert.equal(source.includes('bindMiniProgramIdentity'), false);
@@ -284,7 +195,7 @@ test('13. 工作台不保留可输入的绑定或身份伪造入口', () => {
   assert.equal(wxml.includes('security'), false);
 });
 
-test('14. 身份切换后的强制刷新会等待进行中的刷新，再重新读取 session', async () => {
+test('15. 强制刷新会等待进行中的刷新，再重新读取 session', async () => {
   const instance = createPageInstance(workbench.pageDefinition);
   let resolveFirstRefresh;
   let refreshCount = 0;
@@ -307,14 +218,14 @@ test('14. 身份切换后的强制刷新会等待进行中的刷新，再重新�
   assert.equal(refreshCount, 2);
 });
 
-test('15. 学院名称仅用于工作台展示，保留可信 collegeId 供现有权限链路使用', () => {
+test('16. 学院名称仅用于工作台展示，保留可信 collegeId 供现有权限链路使用', () => {
   const mapped = workbench.normalizeProfile(COUNSELOR);
   const trustedName = workbench.normalizeProfile({ ...COUNSELOR, collegeName: '可信返回的学院名称' });
   const unknown = workbench.normalizeProfile({ ...COUNSELOR, collegeId: 'college_other' });
   const wxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxml'), 'utf8');
 
   assert.equal(mapped.collegeId, 'college_cs');
-  assert.equal(mapped.collegeName, '计算机学院');
+  assert.equal(mapped.collegeName, '计算机科学学院');
   assert.equal(trustedName.collegeName, '可信返回的学院名称');
   assert.equal(unknown.collegeName, '');
   assert.match(wxml, /所属学院/);
@@ -322,7 +233,7 @@ test('15. 学院名称仅用于工作台展示，保留可信 collegeId 供现�
   assert.equal(wxml.includes('profile.collegeId'), false);
 });
 
-test('16. 辅导员工单入口采用浅蓝待办、白底常规、浅红重点的固定 2×2 卡片布局', () => {
+test('17. 辅导员工单入口采用浅蓝待办、白底常规、浅红重点的固定 2×2 卡片布局', () => {
   const css = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxss'), 'utf8');
   const counselorCss = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/counselor/reports/index.wxss'), 'utf8');
   const wxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxml'), 'utf8');

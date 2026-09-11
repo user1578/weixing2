@@ -86,18 +86,6 @@
   font-size: 23rpx;
 }
 
-.switch_button {
-  flex: none;
-  margin: 0 0 0 16rpx;
-  padding: 0 18rpx;
-  border: 1rpx solid #bed6ff;
-  border-radius: 999rpx;
-  background: #f8fbff;
-  color: #2563eb;
-  font-size: 24rpx;
-  line-height: 54rpx;
-}
-
 .hello_block {
   margin: 42rpx 6rpx 24rpx;
 }
@@ -384,68 +372,4 @@
   color: #b45309;
   font-size: 24rpx;
   line-height: 1.5;
-}
-
-.sheet_mask {
-  position: fixed;
-  z-index: 20;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  display: flex;
-  align-items: flex-end;
-  background: rgba(15, 23, 42, 0.42);
-}
-
-.switch_sheet {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 18rpx 24rpx calc(28rpx + env(safe-area-inset-bottom));
-  border-radius: 28rpx 28rpx 0 0;
-  background: #ffffff;
-}
-
-.sheet_handle {
-  width: 64rpx;
-  height: 8rpx;
-  margin: 0 auto 24rpx;
-  border-radius: 999rpx;
-  background: #dbe4f0;
-}
-
-.sheet_title {
-  color: #17233d;
-  font-size: 34rpx;
-  font-weight: 700;
-}
-
-.sheet_hint {
-  margin: 10rpx 0 26rpx;
-  color: #718197;
-  font-size: 24rpx;
-}
-
-.sheet_option,
-.sheet_cancel {
-  margin: 0 0 16rpx;
-  border-radius: 16rpx;
-  font-size: 29rpx;
-  line-height: 88rpx;
-}
-
-.sheet_option {
-  background: #f4f8ff;
-  color: #1e3a8a;
-}
-
-.sheet_option_disabled {
-  background: #f1f5f9;
-  color: #94a3b8;
-}
-
-.sheet_cancel {
-  margin-bottom: 0;
-  background: #f8fafc;
-  color: #64748b;
 }

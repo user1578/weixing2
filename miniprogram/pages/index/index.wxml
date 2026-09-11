@@ -17,7 +17,6 @@
       </view>
       <view class="identity_bottom">
         <view>当前身份已通过小程序会话确认</view>
-        <button class="switch_button" wx:if="{{demoSwitchAvailable}}" bindtap="openSwitchSheet" disabled="{{identitySwitchLoading}}">切换身份</button>
       </view>
     </view>
 
@@ -140,8 +139,8 @@
 
   <view class="state_card" wx:elif="{{sessionCode === 'UNBOUND'}}">
     <view>当前微信尚未绑定工作台身份。</view>
-    <view class="unbound_hint">请使用管理员已配置的学生或辅导员演示身份进入。</view>
-    <button class="retry_button" bindtap="refreshSession" disabled="{{sessionLoading}}">重新检查身份</button>
+    <view class="unbound_hint">请验证管理员预分配的身份编号和姓名。</view>
+    <button class="retry_button" bindtap="goToBinding">验证预分配身份</button>
   </view>
 
   <view class="state_card error_state" wx:else>
@@ -149,14 +148,4 @@
     <button class="retry_button" bindtap="refreshSession" disabled="{{sessionLoading}}">重新加载</button>
   </view>
 
-  <view class="sheet_mask" wx:if="{{switchSheetVisible}}" bindtap="closeSwitchSheet">
-    <view class="switch_sheet" catchtap="preventTap">
-      <view class="sheet_handle"></view>
-      <view class="sheet_title">切换演示身份</view>
-      <view class="sheet_hint">切换后将重新验证小程序会话</view>
-      <button class="sheet_option {{identitySwitchLoading || profile.role === 'student' ? 'sheet_option_disabled' : ''}}" data-target-role="student" bindtap="switchDemoIdentity" disabled="{{identitySwitchLoading || profile.role === 'student'}}">学生身份<text wx:if="{{profile.role === 'student'}}">（当前）</text></button>
-      <button class="sheet_option {{identitySwitchLoading || profile.role === 'counselor' ? 'sheet_option_disabled' : ''}}" data-target-role="counselor" bindtap="switchDemoIdentity" disabled="{{identitySwitchLoading || profile.role === 'counselor'}}">辅导员身份<text wx:if="{{profile.role === 'counselor'}}">（当前）</text></button>
-      <button class="sheet_cancel" bindtap="closeSwitchSheet" disabled="{{identitySwitchLoading}}">取消</button>
-    </view>
-  </view>
 </view>

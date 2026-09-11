@@ -4,8 +4,8 @@ const crypto = require('crypto');
 
 const EXPECTED_APP_ID = 'wxe262970211858262';
 const TARGET_ENV_ID = 'aa-d4gvb4o3t50fc94f8';
-const ALLOWED_ROLES = new Set(['student', 'counselor']);
-const ALLOWED_INPUT_KEYS = new Set(['role', 'identityNo', 'name']);
+const MINI_PROGRAM_ROLES = new Set(['student', 'counselor']);
+const ALLOWED_INPUT_KEYS = new Set(['identityNo', 'name']);
 const IGNORED_PLATFORM_EVENT_KEYS = new Set([
   'userInfo',
   'tcbContext',
@@ -44,9 +44,6 @@ function validateInput(event) {
   if (Object.keys(event).some((key) => !ACCEPTED_EVENT_KEYS.has(key))) {
     return null;
   }
-  if (!ALLOWED_ROLES.has(event.role)) {
-    return null;
-  }
   if (typeof event.identityNo !== 'string' || typeof event.name !== 'string') {
     return null;
   }
@@ -56,7 +53,7 @@ function validateInput(event) {
   if (!identityNo || !name) {
     return null;
   }
-  return { role: event.role, identityNo, name };
+  return { identityNo, name };
 }
 
 function getUnknownEventKeys(event) {
@@ -106,9 +103,12 @@ async function findById(transaction, userId) {
 
 function validateTargetForBinding(user, input) {
   if (!user) {
-    return failure('IDENTITY_NOT_FOUND', '未找到对应的演示身份档案');
+    return failure('IDENTITY_NOT_FOUND', '未找到管理员预分配的身份档案');
   }
-  if (user.role !== input.role || user.name !== input.name) {
+  if (!MINI_PROGRAM_ROLES.has(user.role)) {
+    return failure('FORBIDDEN', '该账号不能通过小程序登录');
+  }
+  if (user.name !== input.name) {
     return failure('IDENTITY_MISMATCH', '身份信息不匹配');
   }
   if (user.status !== 'active') {
@@ -125,8 +125,21 @@ function validateTargetForBinding(user, input) {
   return null;
 }
 
+async function findBindingTarget(db, identityNo) {
+  const candidates = (await Promise.all([
+    findOne(db, { identityKey: `student:${identityNo}` }),
+    findOne(db, { identityKey: `counselor:${identityNo}` }),
+  ])).filter(Boolean);
+
+  if (candidates.length === 0) return { target: null, failure: null };
+  if (candidates.length > 1) {
+    return { target: null, failure: failure('CONFLICT', '身份编号对应多个档案，请联系管理员') };
+  }
+  return { target: candidates[0], failure: null };
+}
+
 function validateExistingBinding(user, trustedOpenId) {
-  if (user.role === 'security' || !ALLOWED_ROLES.has(user.role)) {
+  if (user.role === 'security' || !MINI_PROGRAM_ROLES.has(user.role)) {
     return failure('FORBIDDEN', '该账号不能通过小程序登录');
   }
   if (user.status !== 'active') {
@@ -230,14 +243,10 @@ function createHandler({
           stage: 'validateInputUnknownKeys',
           unknownEventKeys,
         });
-        return failure('INVALID_INPUT', '请输入有效的角色、学号或工号及姓名');
+        return failure('INVALID_INPUT', '请输入有效的身份编号及姓名');
       }
 
       const input = validateInput(event);
-      if (!input) {
-        return failure('INVALID_INPUT', '请输入有效的角色、学号或工号及姓名');
-      }
-
       const wxContext = getWXContext() || {};
       const appId = getAppId(wxContext);
       if (appId && appId !== EXPECTED_APP_ID) {
@@ -258,8 +267,13 @@ function createHandler({
         return existingResult;
       }
 
-      const identityKey = `${input.role === 'student' ? 'student' : 'counselor'}:${input.identityNo}`;
-      const target = await findOne(db, { identityKey });
+      if (!input) {
+        return failure('INVALID_INPUT', '请输入有效的身份编号及姓名');
+      }
+
+      const targetLookup = await findBindingTarget(db, input.identityNo);
+      if (targetLookup.failure) return targetLookup.failure;
+      const target = targetLookup.target;
       const targetFailure = validateTargetForBinding(target, input);
       if (targetFailure) {
         resourceId = target && target._id;

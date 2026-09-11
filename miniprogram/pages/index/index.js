@@ -4,32 +4,16 @@ const ROLE_LABELS = Object.freeze({
 });
 
 const SESSION_MESSAGES = Object.freeze({
-  UNBOUND: "当前微信尚未绑定身份，请完成演示身份绑定后继续。",
+  UNBOUND: "当前微信尚未绑定身份，请验证管理员预分配的身份后继续。",
   FORBIDDEN: "当前身份不能使用小程序工作台。",
   ACCOUNT_DISABLED: "当前账号不可用，请联系管理员。",
   INTERNAL_ERROR: "身份信息加载失败，请稍后重试。",
 });
 
-const SWITCH_MESSAGES = Object.freeze({
-  SWITCH_DISABLED: "当前环境未开启演示身份切换。",
-  INVALID_INPUT: "可切换身份无效。",
-  UNBOUND: "当前微信尚未绑定演示身份。",
-  FORBIDDEN: "当前身份不允许演示切换。",
-  ACCOUNT_DISABLED: "目标账号当前不可用。",
-  NOT_FOUND: "未找到目标演示身份。",
-  CONFLICT: "身份状态已变化，请刷新后重试。",
-  INTERNAL_ERROR: "身份切换失败，请稍后重试。",
-});
-
-const DEMO_IDENTITIES = Object.freeze({
-  student: Object.freeze({ userId: "usr_student_demo_001", collegeId: "college_cs" }),
-  counselor: Object.freeze({ userId: "usr_counselor_demo_001", collegeId: "college_cs" }),
-});
-
-// UI-only labels from the reviewed demo colleges seed. Authorization always uses the
+// UI-only labels from the reviewed colleges seed. Authorization always uses the
 // server-resolved collegeId and never this display mapping.
-const DEMO_COLLEGE_DISPLAY_NAMES = Object.freeze({
-  college_cs: "计算机学院",
+const COLLEGE_DISPLAY_NAMES = Object.freeze({
+  college_cs: "计算机科学学院",
 });
 
 const REPORT_STATUS_LABELS = Object.freeze({
@@ -59,7 +43,7 @@ function normalizeProfile(profile = {}) {
   const collegeId = typeof profile.collegeId === "string" && profile.collegeId.trim() ? profile.collegeId.trim() : "";
   const collegeName = typeof profile.collegeName === "string" && profile.collegeName.trim()
     ? profile.collegeName.trim()
-    : (DEMO_COLLEGE_DISPLAY_NAMES[collegeId] || "");
+    : (COLLEGE_DISPLAY_NAMES[collegeId] || "");
   return {
     userId: profile.userId,
     role: profile.role,
@@ -69,12 +53,6 @@ function normalizeProfile(profile = {}) {
     collegeName,
     focusFlag: profile.focusFlag === true,
   };
-}
-
-function isDemoIdentityCandidate(profile) {
-  if (!profile || !DEMO_IDENTITIES[profile.role]) return false;
-  const expected = DEMO_IDENTITIES[profile.role];
-  return profile.userId === expected.userId && profile.collegeId === expected.collegeId;
 }
 
 function sameProfile(left, right) {
@@ -111,19 +89,12 @@ function statusTextForCounselor(status) {
   return COUNSELOR_STATUS_LABELS[status] || "状态待更新";
 }
 
-function isSwitchTarget(targetRole) {
-  return targetRole === "student" || targetRole === "counselor";
-}
-
 const pageDefinition = {
   data: {
     sessionLoading: false,
     sessionCode: "",
     profile: null,
     message: "",
-    demoSwitchAvailable: false,
-    identitySwitchLoading: false,
-    switchSheetVisible: false,
     workbenchLoading: false,
     workbenchNotice: "",
     studentSummary: buildStudentSummary([]),
@@ -178,8 +149,6 @@ const pageDefinition = {
         this.setData({
           sessionCode: code === "BOUND" ? "INTERNAL_ERROR" : code,
           profile: null,
-          demoSwitchAvailable: false,
-          switchSheetVisible: false,
           message: code === "BOUND" ? SESSION_MESSAGES.INTERNAL_ERROR : messageFor(SESSION_MESSAGES, code, SESSION_MESSAGES.INTERNAL_ERROR),
           studentSummary: buildStudentSummary([]),
           counselorSummary: buildCounselorSummary([]),
@@ -191,20 +160,13 @@ const pageDefinition = {
         sessionCode: "BOUND",
         profile,
         message: "",
-        demoSwitchAvailable: false,
-        switchSheetVisible: false,
       });
-      await Promise.all([
-        this.checkDemoSwitchAvailability(profile),
-        this.loadWorkbenchData(profile),
-      ]);
+      await this.loadWorkbenchData(profile);
       return sameProfile(this.data.profile, profile);
     } catch (error) {
       this.setData({
         sessionCode: "INTERNAL_ERROR",
         profile: null,
-        demoSwitchAvailable: false,
-        switchSheetVisible: false,
         message: SESSION_MESSAGES.INTERNAL_ERROR,
         studentSummary: buildStudentSummary([]),
         counselorSummary: buildCounselorSummary([]),
@@ -212,27 +174,6 @@ const pageDefinition = {
       return false;
     } finally {
       this.setData({ sessionLoading: false });
-    }
-  },
-
-  async checkDemoSwitchAvailability(profile) {
-    if (!isDemoIdentityCandidate(profile)) {
-      if (sameProfile(this.data.profile, profile)) this.setData({ demoSwitchAvailable: false });
-      return false;
-    }
-    try {
-      // The same-role request is an existing, no-write ALREADY_ACTIVE verification path.
-      const response = await wx.cloud.callFunction({
-        name: "switchDemoMiniProgramIdentity",
-        data: { targetRole: profile.role },
-      });
-      const result = response.result || {};
-      const available = result.ok === true && result.code === "ALREADY_ACTIVE";
-      if (sameProfile(this.data.profile, profile)) this.setData({ demoSwitchAvailable: available });
-      return available;
-    } catch (error) {
-      if (sameProfile(this.data.profile, profile)) this.setData({ demoSwitchAvailable: false });
-      return false;
     }
   },
 
@@ -259,50 +200,6 @@ const pageDefinition = {
     }
   },
 
-  openSwitchSheet() {
-    if (!this.data.demoSwitchAvailable || !this.data.profile || this.data.identitySwitchLoading) return;
-    this.setData({ switchSheetVisible: true });
-  },
-
-  closeSwitchSheet() {
-    if (this.data.identitySwitchLoading) return;
-    this.setData({ switchSheetVisible: false });
-  },
-
-  preventTap() {},
-
-  async switchDemoIdentity(event) {
-    const targetRole = event && event.currentTarget && event.currentTarget.dataset && event.currentTarget.dataset.targetRole;
-    const previousProfile = this.data.profile;
-    if (!isSwitchTarget(targetRole) || !previousProfile || !this.data.demoSwitchAvailable || this.data.identitySwitchLoading) return;
-
-    this.setData({ identitySwitchLoading: true, switchSheetVisible: false });
-    try {
-      const response = await wx.cloud.callFunction({
-        name: "switchDemoMiniProgramIdentity",
-        data: { targetRole },
-      });
-      const result = response.result || {};
-      if (!result.ok || (result.code !== "IDENTITY_SWITCHED" && result.code !== "ALREADY_ACTIVE")) {
-        wx.showToast({ title: messageFor(SWITCH_MESSAGES, result.code, SWITCH_MESSAGES.INTERNAL_ERROR), icon: "none" });
-        return;
-      }
-
-      const sessionLoaded = await this.refreshSession({ force: true });
-      const targetConfirmed = sessionLoaded && this.data.profile && this.data.profile.role === targetRole;
-      if (targetConfirmed) {
-        wx.showToast({ title: result.code === "ALREADY_ACTIVE" ? "当前已是该身份" : "身份切换成功", icon: "success" });
-      } else {
-        wx.showToast({ title: "身份更新未确认，请重新进入工作台", icon: "none" });
-      }
-    } catch (error) {
-      const sessionLoaded = await this.refreshSession({ force: true });
-      wx.showToast({ title: sessionLoaded ? "切换结果未知，已刷新身份" : "切换状态未确认，请重新进入工作台", icon: "none" });
-    } finally {
-      this.setData({ identitySwitchLoading: false });
-    }
-  },
-
   goToStudentAlerts() {
     if (!this.data.profile || this.data.profile.role !== "student") return;
     wx.navigateTo({ url: "/pages/alerts/index/index" });
@@ -318,6 +215,10 @@ const pageDefinition = {
     wx.navigateTo({ url: "/pages/counselor/reports/index" });
   },
 
+  goToBinding() {
+    wx.navigateTo({ url: "/pages/bind/index" });
+  },
+
   showUnavailable() {
     wx.showToast({ title: "现有服务暂未提供该数据入口", icon: "none" });
   },
@@ -329,15 +230,12 @@ Page(pageDefinition);
 if (typeof module !== "undefined") {
   module.exports = {
     __testables: {
-      DEMO_IDENTITIES,
       REPORT_STATUS_LABELS,
       COUNSELOR_STATUS_LABELS,
       buildCounselorSummary,
       buildStudentSummary,
-      isDemoIdentityCandidate,
-      isSwitchTarget,
       normalizeProfile,
-      DEMO_COLLEGE_DISPLAY_NAMES,
+      COLLEGE_DISPLAY_NAMES,
       pageDefinition,
       sameProfile,
       statusTextForCounselor,

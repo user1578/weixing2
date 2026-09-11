@@ -31,6 +31,7 @@ function createMockDb(users = [], options = {}) {
     audits: [],
     transactionCalls: 0,
     conditionalUpdates: [],
+    queries: [],
   };
   const clone = (value) => (value ? { ...value } : value);
   const matches = (document, query) => Object.entries(query).every(([key, value]) => document[key] === value);
@@ -40,6 +41,7 @@ function createMockDb(users = [], options = {}) {
         limit() {
           return {
             async get() {
+              state.queries.push({ collection, query: { ...query } });
               const documents = collection === 'users' ? state.users.filter((user) => matches(user, query)).map(clone) : [];
               return { data: documents.slice(0, 1) };
             },
@@ -207,57 +209,60 @@ test('10. demo 模式未开启时拒绝绑定', async () => {
   assert.equal((await handler({})).code, 'BINDING_DISABLED');
 });
 
-test('11. 非法 role 返回 INVALID_INPUT', async () => {
-  const { handler } = makeBinding([], trustedContext);
-  assert.equal((await handler({ role: 'security', identityNo: '1', name: '张三' })).code, 'INVALID_INPUT');
+test('11. bind 请求拒绝客户端 role，不能借此伪造辅导员身份', async () => {
+  const { handler, state } = makeBinding([baseUser()], trustedContext);
+  assert.equal((await handler({ role: 'counselor', identityNo: '20230001', name: '张三' })).code, 'INVALID_INPUT');
+  assert.equal(state.transactionCalls, 0);
 });
 
 test('12. 空 identityNo 返回 INVALID_INPUT', async () => {
   const { handler } = makeBinding([], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: ' ', name: '张三' })).code, 'INVALID_INPUT');
+  assert.equal((await handler({ identityNo: ' ', name: '张三' })).code, 'INVALID_INPUT');
 });
 
 test('13. 空 name 返回 INVALID_INPUT', async () => {
   const { handler } = makeBinding([], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: ' ' })).code, 'INVALID_INPUT');
+  assert.equal((await handler({ identityNo: '20230001', name: ' ' })).code, 'INVALID_INPUT');
 });
 
 test('14. 未找到身份档案返回 IDENTITY_NOT_FOUND', async () => {
   const { handler } = makeBinding([], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'IDENTITY_NOT_FOUND');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'IDENTITY_NOT_FOUND');
 });
 
 test('15. 姓名不精确匹配返回 IDENTITY_MISMATCH', async () => {
   const { handler } = makeBinding([baseUser()], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '李四' })).code, 'IDENTITY_MISMATCH');
+  assert.equal((await handler({ identityNo: '20230001', name: '李四' })).code, 'IDENTITY_MISMATCH');
 });
 
 test('16. 停用身份档案返回 ACCOUNT_DISABLED', async () => {
   const { handler } = makeBinding([baseUser({ status: 'suspended' })], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'ACCOUNT_DISABLED');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'ACCOUNT_DISABLED');
 });
 
 test('17. 已被其他微信绑定的目标返回 ACCOUNT_ALREADY_BOUND', async () => {
   const { handler } = makeBinding([baseUser({ bindStatus: 'bound', wxOpenId: 'other-openid', wxIdentityKey: 'openid:other-openid' })], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'ACCOUNT_ALREADY_BOUND');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'ACCOUNT_ALREADY_BOUND');
 });
 
 test('18. 当前微信已有合法绑定返回 ALREADY_BOUND', async () => {
   const user = baseUser({ wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
   const { handler } = makeBinding([user], trustedContext);
-  const response = await handler({ role: 'student', identityNo: '20230001', name: '张三' });
+  const response = await handler({ identityNo: '20230001', name: '张三' });
   assert.equal(response.code, 'ALREADY_BOUND');
   assert.equal(response.profile.userId, user._id);
 });
 
 test('19. 正常 student 绑定在同一事务写入用户与审计', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext);
-  const response = await handler({ role: 'student', identityNo: ' 20230001 ', name: ' 张三 ' });
+  const response = await handler({ identityNo: ' 20230001 ', name: ' 张三 ' });
   assert.equal(response.code, 'BOUND');
   assert.equal(state.transactionCalls, 1);
   assert.equal(state.users[0].bindStatus, 'bound');
   assert.equal(state.users[0].version, 2);
   assert.equal(state.audits.length, 1);
+  assert.equal(state.queries.some(({ query }) => query.identityKey === 'student:20230001'), true);
+  assert.equal(state.queries.some(({ query }) => query.identityKey === 'counselor:20230001'), true);
   assert.deepEqual(state.conditionalUpdates[0].query, {
     _id: 'usr_student_001',
     version: 1,
@@ -269,30 +274,60 @@ test('19. 正常 student 绑定在同一事务写入用户与审计', async () =
 
 test('20. 正常 counselor 绑定', async () => {
   const counselor = baseUser({ _id: 'usr_counselor_001', identityKey: 'counselor:T001', role: 'counselor', staffNo: 'T001', studentNo: null, wxIdentityKey: 'unbound:usr_counselor_001', name: '王老师' });
-  const { handler } = makeBinding([counselor], trustedContext);
-  assert.equal((await handler({ role: 'counselor', identityNo: 'T001', name: '王老师' })).code, 'BOUND');
+  const { handler, state } = makeBinding([counselor], trustedContext);
+  assert.equal((await handler({ identityNo: 'T001', name: '王老师' })).code, 'BOUND');
+  assert.equal(state.queries.some(({ query }) => query.identityKey === 'student:T001'), true);
+  assert.equal(state.queries.some(({ query }) => query.identityKey === 'counselor:T001'), true);
 });
 
-test('21. 事务冲突返回 CONFLICT', async () => {
+test('21. 身份编号同时命中学生和辅导员档案时返回 CONFLICT', async () => {
+  const counselor = baseUser({
+    _id: 'usr_counselor_001',
+    identityKey: 'counselor:20230001',
+    role: 'counselor',
+    staffNo: '20230001',
+    studentNo: null,
+    wxIdentityKey: 'unbound:usr_counselor_001',
+  });
+  const { handler, state } = makeBinding([baseUser(), counselor], trustedContext);
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'CONFLICT');
+  assert.equal(state.transactionCalls, 0);
+  assert.equal(state.audits.length, 0);
+});
+test('22. 已绑定 OPENID 重提另一身份编号仍返回数据库真实 profile', async () => {
+  const boundStudent = baseUser({ wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
+  const counselor = baseUser({
+    _id: 'usr_counselor_001', identityKey: 'counselor:T001', role: 'counselor', name: '王老师',
+    staffNo: 'T001', studentNo: null, wxIdentityKey: 'unbound:usr_counselor_001',
+  });
+  const { handler, state } = makeBinding([boundStudent, counselor], trustedContext);
+  const response = await handler({ identityNo: 'T001', name: '王老师' });
+  assert.equal(response.code, 'ALREADY_BOUND');
+  assert.equal(response.profile.userId, boundStudent._id);
+  assert.equal(response.profile.role, 'student');
+  assert.equal(state.transactionCalls, 0);
+});
+
+test('23. 事务冲突返回 CONFLICT', async () => {
   const { handler } = makeBinding([baseUser()], trustedContext, { transactionConflict: true });
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'CONFLICT');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'CONFLICT');
 });
 
-test('22. wxIdentityKey UNIQUE 冲突返回 WECHAT_ALREADY_BOUND', async () => {
+test('24. wxIdentityKey UNIQUE 冲突返回 WECHAT_ALREADY_BOUND', async () => {
   const { handler } = makeBinding([baseUser()], trustedContext, { uniqueConflict: true });
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'WECHAT_ALREADY_BOUND');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'WECHAT_ALREADY_BOUND');
 });
 
-test('23. OPENID 只取服务端上下文，忽略 event.openid', async () => {
+test('25. OPENID 只取服务端上下文，忽略 event.openid', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext);
-  const response = await handler({ role: 'student', identityNo: '20230001', name: '张三', openid: 'spoofed' });
+  const response = await handler({ identityNo: '20230001', name: '张三', openid: 'spoofed' });
   assert.equal(response.code, 'INVALID_INPUT');
   assert.equal(state.users[0].wxOpenId, null);
 });
 
-test('24. 审计 payload 不含 OPENID 等敏感字段', async () => {
+test('26. 审计 payload 不含 OPENID 等敏感字段', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext);
-  await handler({ role: 'student', identityNo: '20230001', name: '张三' });
+  await handler({ identityNo: '20230001', name: '张三' });
   const auditJson = JSON.stringify(state.audits[0]);
   assert.equal(auditJson.includes('trusted-openid'), false);
   assert.equal(auditJson.includes('identityKey'), false);
@@ -300,49 +335,49 @@ test('24. 审计 payload 不含 OPENID 等敏感字段', async () => {
   assert.equal(auditJson.includes('studentNo'), false);
 });
 
-test('25. 审计失败使绑定事务返回 INTERNAL_ERROR', async () => {
+test('27. 审计失败使绑定事务返回 INTERNAL_ERROR', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext, { auditFailure: true });
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
   assert.equal(state.transactionCalls, 1);
   assert.equal(state.users[0].bindStatus, 'unbound');
   assert.equal(state.audits.length, 0);
 });
 
-test('26. existing binding 命中当前微信但 wxOpenId 不一致时返回 INTERNAL_ERROR', async () => {
+test('28. existing binding 命中当前微信但 wxOpenId 不一致时返回 INTERNAL_ERROR', async () => {
   const user = baseUser({ wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'other-openid', bindStatus: 'bound' });
   const { handler } = makeBinding([user], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
 });
 
-test('27. bound 但 wxOpenId 为 null 的目标档案返回 CONFLICT', async () => {
+test('29. bound 但 wxOpenId 为 null 的目标档案返回 CONFLICT', async () => {
   const user = baseUser({ bindStatus: 'bound', wxOpenId: null, wxIdentityKey: 'unbound:usr_student_001' });
   const { handler } = makeBinding([user], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'CONFLICT');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'CONFLICT');
 });
 
-test('28. bound 但 wxIdentityKey 与 wxOpenId 不一致的目标档案返回 CONFLICT', async () => {
+test('30. bound 但 wxIdentityKey 与 wxOpenId 不一致的目标档案返回 CONFLICT', async () => {
   const user = baseUser({ bindStatus: 'bound', wxOpenId: 'other-openid', wxIdentityKey: 'openid:not-the-same' });
   const { handler } = makeBinding([user], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'CONFLICT');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'CONFLICT');
 });
 
-test('29. 事务内重新读取到 version drift 时返回 CONFLICT', async () => {
+test('31. 事务内重新读取到 version drift 时返回 CONFLICT', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext, {
     transactionReadUser: baseUser({ version: 2 }),
   });
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'CONFLICT');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'CONFLICT');
   assert.equal(state.conditionalUpdates.length, 0);
 });
 
-test('30. 条件更新影响行数为零时返回 CONFLICT', async () => {
+test('32. 条件更新影响行数为零时返回 CONFLICT', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext, { conditionUpdateZero: true });
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'CONFLICT');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'CONFLICT');
   assert.equal(state.audits.length, 0);
 });
 
-test('31. bind APPID 不匹配返回 FORBIDDEN', async () => {
+test('33. bind APPID 不匹配返回 FORBIDDEN', async () => {
   const { handler } = makeBinding([baseUser()], { OPENID: 'trusted-openid', APPID: 'wrong-appid' });
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'FORBIDDEN');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'FORBIDDEN');
 });
 
 test('32. 两个默认 handler 都固定使用 TARGET_ENV_ID', () => {
@@ -444,7 +479,7 @@ test('42. 正常 BOUND session 仍只返回最小 profile 且不写成功审计'
 
 test('43. 成功绑定保留用户更新与 success audit 的同一事务', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'BOUND');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'BOUND');
   assert.equal(state.transactionCalls, 1);
   assert.equal(state.audits[0].action, 'identity.bind');
   assert.equal(state.audits[0].result, 'success');
@@ -454,7 +489,7 @@ test('43. 成功绑定保留用户更新与 success audit 的同一事务', asyn
 
 test('44. 成功绑定 success audit 写失败时事务回滚', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext, { auditFailure: true });
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
   assert.equal(state.users[0].bindStatus, 'unbound');
   assert.equal(state.audits.length, 0);
 });
@@ -462,7 +497,7 @@ test('44. 成功绑定 success audit 写失败时事务回滚', async () => {
 test('45. existingBinding 可信 security 失败写审计', async () => {
   const user = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
   const { handler, state } = makeBinding([user], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'FORBIDDEN');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'FORBIDDEN');
   assert.equal(state.audits[0].action, 'identity.bind');
   assert.equal(state.audits[0].failureReason, 'FORBIDDEN');
   assert.equal(state.audits[0].actorCollegeId, null);
@@ -471,53 +506,53 @@ test('45. existingBinding 可信 security 失败写审计', async () => {
 test('46. existingBinding inactive 失败写审计', async () => {
   const user = baseUser({ status: 'suspended', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
   const { handler, state } = makeBinding([user], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'ACCOUNT_DISABLED');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'ACCOUNT_DISABLED');
   assert.equal(state.audits[0].failureReason, 'ACCOUNT_DISABLED');
 });
 
 test('47. existingBinding 绑定一致性异常写 INTERNAL_ERROR 审计', async () => {
   const user = baseUser({ wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'other-openid', bindStatus: 'bound' });
   const { handler, state } = makeBinding([user], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
   assert.equal(state.audits[0].failureReason, 'INTERNAL_ERROR');
 });
 
 test('48. existingBinding failure audit 写失败时 fail closed', async () => {
   const user = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
   const { handler, state, logs } = makeBinding([user], trustedContext, { auditFailure: true });
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'INTERNAL_ERROR');
   assert.equal(state.audits.length, 0);
   assert.deepEqual(logs[0], { requestId: 'req-bind', code: 'INTERNAL_ERROR', resourceId: user._id, stage: 'existingBindingAudit' });
 });
 
 test('49. 首次绑定 IDENTITY_NOT_FOUND 不伪造 actor audit', async () => {
   const { handler, state } = makeBinding([], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'IDENTITY_NOT_FOUND');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'IDENTITY_NOT_FOUND');
   assert.equal(state.audits.length, 0);
 });
 
 test('50. 首次绑定 IDENTITY_MISMATCH 不把目标档案作为 actor audit', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '李四' })).code, 'IDENTITY_MISMATCH');
+  assert.equal((await handler({ identityNo: '20230001', name: '李四' })).code, 'IDENTITY_MISMATCH');
   assert.equal(state.audits.length, 0);
 });
 
 test('51. 目标已被其他微信绑定不把目标档案作为 actor audit', async () => {
   const target = baseUser({ bindStatus: 'bound', wxOpenId: 'other-openid', wxIdentityKey: 'openid:other-openid' });
   const { handler, state } = makeBinding([target], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'ACCOUNT_ALREADY_BOUND');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'ACCOUNT_ALREADY_BOUND');
   assert.equal(state.audits.length, 0);
 });
 
 test('52. bind AppID 不匹配不写 actor audit', async () => {
   const { handler, state } = makeBinding([baseUser()], { OPENID: 'trusted-openid', APPID: 'wrong-appid' });
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三' })).code, 'FORBIDDEN');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三' })).code, 'FORBIDDEN');
   assert.equal(state.audits.length, 0);
 });
 
 test('53. event 中伪造身份字段不能影响 trusted context', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext);
-  const response = await handler({ role: 'student', identityNo: '20230001', name: '张三', openid: 'spoofed', userId: 'usr_attacker', actorId: 'usr_attacker' });
+  const response = await handler({ identityNo: '20230001', name: '张三', openid: 'spoofed', userId: 'usr_attacker', actorId: 'usr_attacker' });
   assert.equal(response.code, 'INVALID_INPUT');
   assert.equal(state.users[0].wxOpenId, null);
   assert.equal(state.audits.length, 0);
@@ -529,7 +564,7 @@ test('54. runtime logger payload 不含 OPENID 或完整 event', async () => {
   await sessionRun.handler({ openid: 'spoofed' });
   const bindingUser = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
   const bindingRun = makeBinding([bindingUser], trustedContext, { auditFailure: true });
-  await bindingRun.handler({ role: 'student', identityNo: '20230001', name: '张三' });
+  await bindingRun.handler({ identityNo: '20230001', name: '张三' });
   for (const entry of [...sessionRun.logs, ...bindingRun.logs]) {
     assert.deepEqual(Object.keys(entry).sort(), ['code', 'requestId', 'resourceId', 'stage']);
     const runtimeJson = JSON.stringify(entry);
@@ -539,7 +574,7 @@ test('54. runtime logger payload 不含 OPENID 或完整 event', async () => {
 
 test('55. 平台注入 userInfo 时仍可完成正常绑定', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext);
-  const response = await handler({ role: 'student', identityNo: '20230001', name: '张三', userInfo: { nickName: '平台资料' } });
+  const response = await handler({ identityNo: '20230001', name: '张三', userInfo: { nickName: '平台资料' } });
   assert.equal(response.code, 'BOUND');
   assert.equal(state.users[0].wxOpenId, trustedContext.OPENID);
   assert.equal(state.audits.length, 1);
@@ -547,7 +582,7 @@ test('55. 平台注入 userInfo 时仍可完成正常绑定', async () => {
 
 test('56. userInfo 内伪造 openId 不能影响 trusted getWXContext OPENID', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext);
-  const response = await handler({ role: 'student', identityNo: '20230001', name: '张三', userInfo: { openId: 'spoofed-openid', appId: 'wrong-appid' } });
+  const response = await handler({ identityNo: '20230001', name: '张三', userInfo: { openId: 'spoofed-openid', appId: 'wrong-appid' } });
   assert.equal(response.code, 'BOUND');
   assert.equal(state.users[0].wxOpenId, trustedContext.OPENID);
   assert.notEqual(state.users[0].wxOpenId, 'spoofed-openid');
@@ -555,30 +590,30 @@ test('56. userInfo 内伪造 openId 不能影响 trusted getWXContext OPENID', a
 
 test('57. event 额外 openid 仍返回 INVALID_INPUT', async () => {
   const { handler } = makeBinding([baseUser()], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三', openid: 'spoofed' })).code, 'INVALID_INPUT');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三', openid: 'spoofed' })).code, 'INVALID_INPUT');
 });
 
 test('58. event 额外 userId 仍返回 INVALID_INPUT', async () => {
   const { handler } = makeBinding([baseUser()], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三', userId: 'usr_attacker' })).code, 'INVALID_INPUT');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三', userId: 'usr_attacker' })).code, 'INVALID_INPUT');
 });
 
 test('59. event 额外 actorId 仍返回 INVALID_INPUT', async () => {
   const { handler } = makeBinding([baseUser()], trustedContext);
-  assert.equal((await handler({ role: 'student', identityNo: '20230001', name: '张三', actorId: 'usr_attacker' })).code, 'INVALID_INPUT');
+  assert.equal((await handler({ identityNo: '20230001', name: '张三', actorId: 'usr_attacker' })).code, 'INVALID_INPUT');
 });
 
 test('60. userInfo 及其 openId 不进入 audit 或 runtime logger', async () => {
   const userInfo = { openId: 'spoofed-openid', nickName: '平台资料' };
   const successRun = makeBinding([baseUser()], trustedContext);
-  await successRun.handler({ role: 'student', identityNo: '20230001', name: '张三', userInfo });
+  await successRun.handler({ identityNo: '20230001', name: '张三', userInfo });
   const auditJson = JSON.stringify(successRun.state.audits[0]);
   assert.equal(auditJson.includes('userInfo'), false);
   assert.equal(auditJson.includes('spoofed-openid'), false);
 
   const existingUser = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
   const failureRun = makeBinding([existingUser], trustedContext, { auditFailure: true });
-  await failureRun.handler({ role: 'student', identityNo: '20230001', name: '张三', userInfo });
+  await failureRun.handler({ identityNo: '20230001', name: '张三', userInfo });
   const runtimeJson = JSON.stringify(failureRun.logs[0]);
   assert.equal(runtimeJson.includes('userInfo'), false);
   assert.equal(runtimeJson.includes('spoofed-openid'), false);
@@ -586,7 +621,7 @@ test('60. userInfo 及其 openId 不进入 audit 或 runtime logger', async () =
 
 test('61. 未知顶层字段返回 INVALID_INPUT 并记录最小脱敏诊断', async () => {
   const { handler, logs } = makeBinding([baseUser()], trustedContext);
-  const response = await handler({ role: 'student', identityNo: '20230001', name: '张三', _platformField: '不应记录的值' });
+  const response = await handler({ identityNo: '20230001', name: '张三', _platformField: '不应记录的值' });
   assert.equal(response.code, 'INVALID_INPUT');
   assert.deepEqual(logs, [{
     requestId: 'req-bind',
@@ -599,13 +634,13 @@ test('61. 未知顶层字段返回 INVALID_INPUT 并记录最小脱敏诊断', a
 
 test('62. 未知顶层字段诊断只包含排序后的字段名', async () => {
   const { handler, logs } = makeBinding([baseUser()], trustedContext);
-  await handler({ role: 'student', identityNo: '20230001', name: '张三', zPlatformField: 'z', _platformField: 'a' });
+  await handler({ identityNo: '20230001', name: '张三', zPlatformField: 'z', _platformField: 'a' });
   assert.deepEqual(logs[0].unknownEventKeys, ['_platformField', 'zPlatformField']);
 });
 
 test('63. 合法 userInfo 不触发未知顶层字段诊断', async () => {
   const { handler, logs } = makeBinding([baseUser()], trustedContext);
-  const response = await handler({ role: 'student', identityNo: '20230001', name: '张三', userInfo: { nickName: '平台资料' } });
+  const response = await handler({ identityNo: '20230001', name: '张三', userInfo: { nickName: '平台资料' } });
   assert.equal(response.code, 'BOUND');
   assert.deepEqual(logs, []);
 });
@@ -613,7 +648,6 @@ test('63. 合法 userInfo 不触发未知顶层字段诊断', async () => {
 test('64. 未知顶层字段诊断日志不包含任何输入或身份上下文值', async () => {
   const { handler, logs } = makeBinding([baseUser()], trustedContext);
   await handler({
-    role: 'student',
     identityNo: '20230001',
     name: '张三',
     userInfo: { openId: 'spoofed-openid', nickName: '不应记录的 userInfo 内容' },
@@ -628,7 +662,6 @@ test('64. 未知顶层字段诊断日志不包含任何输入或身份上下文�
 test('65. 平台注入 tcbContext 时仍可完成正常绑定', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext);
   const response = await handler({
-    role: 'student',
     identityNo: '20230001',
     name: '张三',
     tcbContext: { requestId: 'platform-request-id' },
@@ -641,7 +674,6 @@ test('65. 平台注入 tcbContext 时仍可完成正常绑定', async () => {
 test('66. tcbContext 中伪造身份字段不能影响 trusted getWXContext OPENID', async () => {
   const { handler, state } = makeBinding([baseUser()], trustedContext);
   const response = await handler({
-    role: 'student',
     identityNo: '20230001',
     name: '张三',
     tcbContext: { openId: 'spoofed-openid', OPENID: 'spoofed-openid-uppercase', appId: 'wrong-appid' },
@@ -656,7 +688,6 @@ test('66. tcbContext 中伪造身份字段不能影响 trusted getWXContext OPEN
 test('67. userInfo 与 tcbContext 同时存在时不触发未知字段诊断', async () => {
   const { handler, logs } = makeBinding([baseUser()], trustedContext);
   const response = await handler({
-    role: 'student',
     identityNo: '20230001',
     name: '张三',
     userInfo: { nickName: '平台资料' },
@@ -674,7 +705,7 @@ test('68. tcbContext 内容不进入 audit 或 runtime logger', async () => {
     privateField: '不应记录的 tcbContext 内容',
   };
   const successRun = makeBinding([baseUser()], trustedContext);
-  await successRun.handler({ role: 'student', identityNo: '20230001', name: '张三', tcbContext });
+  await successRun.handler({ identityNo: '20230001', name: '张三', tcbContext });
   const auditJson = JSON.stringify(successRun.state.audits[0]);
   for (const secret of ['tcbContext', 'spoofed-openid', 'spoofed-openid-uppercase', 'wrong-appid', '不应记录的 tcbContext 内容']) {
     assert.equal(auditJson.includes(secret), false);
@@ -682,7 +713,7 @@ test('68. tcbContext 内容不进入 audit 或 runtime logger', async () => {
 
   const existingUser = baseUser({ role: 'security', wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound' });
   const failureRun = makeBinding([existingUser], trustedContext, { auditFailure: true });
-  await failureRun.handler({ role: 'student', identityNo: '20230001', name: '张三', tcbContext });
+  await failureRun.handler({ identityNo: '20230001', name: '张三', tcbContext });
   const runtimeJson = JSON.stringify(failureRun.logs[0]);
   for (const secret of ['tcbContext', 'spoofed-openid', 'spoofed-openid-uppercase', 'wrong-appid', '不应记录的 tcbContext 内容']) {
     assert.equal(runtimeJson.includes(secret), false);
@@ -692,7 +723,6 @@ test('68. tcbContext 内容不进入 audit 或 runtime logger', async () => {
 test('69. 其他未知或伪造顶层字段仍被拒绝并记录脱敏诊断', async () => {
   const { handler, logs, state } = makeBinding([baseUser()], trustedContext);
   const response = await handler({
-    role: 'student',
     identityNo: '20230001',
     name: '张三',
     tcbContext: { requestId: 'platform-request-id' },
