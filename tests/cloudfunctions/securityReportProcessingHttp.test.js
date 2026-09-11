@@ -21,6 +21,21 @@ function clone(value) {
   return structuredClone(value);
 }
 
+function normalizeWrite(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).length === 1 && Object.hasOwn(value, 'data')
+    ? value.data
+    : value;
+}
+
+function equals(left, right) {
+  return left instanceof Date && right instanceof Date ? left.getTime() === right.getTime() : left === right;
+}
+
+function matches(document, condition) {
+  return Object.entries(condition).every(([key, expected]) => equals(document[key], expected));
+}
+
 function documentResult(document) {
   const data = document ? [clone(document)] : [];
   if (document) Object.assign(data, clone(document));
@@ -36,6 +51,7 @@ function createMockDb({ users = [], reports = [], options = {} } = {}) {
     followups: [],
     authAudits: [],
     writes: [],
+    conditionalUpdates: [],
     queryTrace: [],
     transactionCalls: 0,
   };
@@ -77,17 +93,23 @@ function createMockDb({ users = [], reports = [], options = {} } = {}) {
             state.queryTrace.push({ collection: name, operation: 'doc.get', id, inTransaction });
             return documentResult(document);
           },
-          async update(data) {
+        };
+      },
+      where(condition) {
+        return {
+          async update(rawData) {
             if (!inTransaction && options.rejectDirectBusinessWrites) {
               throw new Error('Business writes must use a transaction handle');
             }
-            state.writes.push({ collection: name, operation: 'update', inTransaction, data: clone(data) });
-            if (name === 'fraud_reports' && options.reportUpdateZero) {
-              return { updated: 0, stats: { updated: 0 } };
+            const data = normalizeWrite(rawData);
+            state.conditionalUpdates.push({ collection: name, condition: clone(condition), data: clone(data), inTransaction });
+            state.writes.push({ collection: name, operation: 'where.update', inTransaction, data: clone(data) });
+            if (name === 'fraud_reports' && typeof options.beforeReportConditionalUpdate === 'function') {
+              options.beforeReportConditionalUpdate(state);
             }
-            const document = rowsFor(name).find((row) => row._id === id);
-            if (document) Object.assign(document, clone(data));
-            return { updated: document ? 1 : 0, stats: { updated: document ? 1 : 0 } };
+            const matched = rowsFor(name).filter((row) => matches(row, condition));
+            matched.forEach((row) => Object.assign(row, clone(data)));
+            return { updated: matched.length, stats: { updated: matched.length } };
           },
         };
       },
@@ -319,10 +341,15 @@ test('1. 成功迁移只更新 report 一次，并新增一条 disposition 和�
   }
   assert.equal(fixture.state.transactionCalls, 1);
   assert.deepEqual(fixture.state.writes.map((write) => [write.collection, write.operation, write.inTransaction]), [
-    ['fraud_reports', 'update', true],
+    ['fraud_reports', 'where.update', true],
     ['security_dispositions', 'add', true],
     ['audit_logs', 'add', true],
   ]);
+  assert.deepEqual(fixture.state.conditionalUpdates[0].condition, {
+    _id: 'report_001',
+    status: 'pending_security_verify',
+    version: 3,
+  });
   assert.equal(fixture.state.followups.length, 0);
 });
 
@@ -415,8 +442,27 @@ test('8. version 不匹配返回 CONFLICT', async () => {
   assert.equal(fixture.state.audits.length, 0);
 });
 
-test('9. 条件更新零条时整个事务返回 CONFLICT 并回滚', async () => {
-  const fixture = await createFixture({ options: { reportUpdateZero: true } });
+test('9. status 在读后写前变化时条件更新零条，事务返回 CONFLICT 并回滚', async () => {
+  const fixture = await createFixture({ options: {
+    beforeReportConditionalUpdate: (state) => { state.reports[0].status = 'in_process'; },
+  } });
+  const before = clone(fixture.state.reports[0]);
+  const response = await startProcess(fixture);
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json.code, 'CONFLICT');
+  assert.deepEqual(fixture.state.reports[0], before);
+  assert.deepEqual(fixture.state.conditionalUpdates[0].condition, {
+    _id: 'report_001', status: 'pending_security_verify', version: 3,
+  });
+  assert.equal(fixture.state.dispositions.length, 0);
+  assert.equal(fixture.state.audits.length, 0);
+});
+
+test('10. version 在读后写前变化时条件更新零条，事务返回 CONFLICT 并回滚', async () => {
+  const fixture = await createFixture({ options: {
+    beforeReportConditionalUpdate: (state) => { state.reports[0].version = 4; },
+  } });
   const before = clone(fixture.state.reports[0]);
   const response = await startProcess(fixture);
 
@@ -427,7 +473,7 @@ test('9. 条件更新零条时整个事务返回 CONFLICT 并回滚', async () =
   assert.equal(fixture.state.audits.length, 0);
 });
 
-test('10. 事务写冲突统一返回 CONFLICT 且不留下半成功数据', async () => {
+test('11. 事务写冲突统一返回 CONFLICT 且不留下半成功数据', async () => {
   const fixture = await createFixture({ options: { transactionConflict: true } });
   const before = clone(fixture.state.reports[0]);
   const response = await startProcess(fixture);
@@ -439,7 +485,7 @@ test('10. 事务写冲突统一返回 CONFLICT 且不留下半成功数据', asy
   assert.equal(fixture.state.audits.length, 0);
 });
 
-test('11. disposition 插入失败时 report 和 audit 一并回滚', async () => {
+test('12. disposition 插入失败时 report 和 audit 一并回滚', async () => {
   for (const options of [{ dispositionFailure: true }, { dispositionResultFailure: true }]) {
     const fixture = await createFixture({ options });
     const before = clone(fixture.state.reports[0]);
@@ -452,7 +498,7 @@ test('11. disposition 插入失败时 report 和 audit 一并回滚', async () =
   }
 });
 
-test('12. audit 插入失败时 report 和 disposition 一并回滚', async () => {
+test('13. audit 插入失败时 report 和 disposition 一并回滚', async () => {
   for (const options of [{ auditFailure: true }, { auditResultFailure: true }]) {
     const fixture = await createFixture({ options });
     const before = clone(fixture.state.reports[0]);
@@ -465,7 +511,7 @@ test('12. audit 插入失败时 report 和 disposition 一并回滚', async () =
   }
 });
 
-test('13. 同一 version 的第二次请求冲突，不会新增第二条 disposition 或 audit', async () => {
+test('14. 同一 version 的第二次请求冲突，不会新增第二条 disposition 或 audit', async () => {
   const fixture = await createFixture();
   const first = await startProcess(fixture);
   const second = await startProcess(fixture);
@@ -477,7 +523,7 @@ test('13. 同一 version 的第二次请求冲突，不会新增第二条 dispos
   assert.equal(fixture.state.audits.length, 1);
 });
 
-test('14. start-process 路由使用既有严格 CORS OPTIONS 行为', async () => {
+test('15. start-process 路由使用既有严格 CORS OPTIONS 行为', async () => {
   const fixture = await createFixture();
   const response = await request(fixture.handler, {
     method: 'OPTIONS',

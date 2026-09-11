@@ -888,11 +888,17 @@ function createSecurityReportProcessingService({
           throw businessError('CONFLICT');
         }
 
-        const updateResult = ensureDatabaseResult(await transaction.collection('fraud_reports').doc(currentReport._id).update({
-          status: 'in_process',
-          currentHandlerId: authenticated.user._id,
-          updatedAt: serverDate(),
-          version: input.version + 1,
+        const updateResult = ensureDatabaseResult(await transaction.collection('fraud_reports').where({
+          _id: currentReport._id,
+          status: 'pending_security_verify',
+          version: input.version,
+        }).update({
+          data: {
+            status: 'in_process',
+            currentHandlerId: authenticated.user._id,
+            updatedAt: serverDate(),
+            version: input.version + 1,
+          },
         }));
         if (updatedCount(updateResult) !== 1) {
           throw businessError('CONFLICT');
