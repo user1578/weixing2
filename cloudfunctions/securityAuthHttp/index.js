@@ -789,6 +789,9 @@ function maskIdentityNo(value) {
   if (normalized.length <= 2) {
     return '*'.repeat(normalized.length);
   }
+  if (normalized.length <= 4) {
+    return `${normalized[0]}${'*'.repeat(normalized.length - 2)}${normalized.at(-1)}`;
+  }
   return `${normalized.slice(0, 2)}${'*'.repeat(Math.max(4, normalized.length - 4))}${normalized.slice(-2)}`;
 }
 
@@ -1363,6 +1366,13 @@ function createSecurityIdentityManagementService({
         const college = await findRecordById(transaction, 'colleges', input.collegeId);
         if (!isActiveCollege(college) || college._id !== input.collegeId) {
           throw businessError('NOT_FOUND');
+        }
+        const [existingStudent, existingCounselor] = await Promise.all([
+          firstRecord(await transaction.collection('users').where({ identityKey: `student:${input.identityNo}` }).get()),
+          firstRecord(await transaction.collection('users').where({ identityKey: `counselor:${input.identityNo}` }).get()),
+        ]);
+        if (existingStudent || existingCounselor) {
+          throw businessError('CONFLICT');
         }
         const createdUser = {
           _id: userId,

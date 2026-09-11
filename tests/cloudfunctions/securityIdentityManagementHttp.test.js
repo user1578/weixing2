@@ -11,6 +11,7 @@ const {
   createAuthService,
   createHttpHandler,
   createSecurityIdentityManagementService,
+  maskIdentityNo,
 } = securityAuth.__testables;
 
 const PASSWORD = 'security-identity-management-test-password';
@@ -285,6 +286,14 @@ test('2. security 可读取脱敏 student/counselor 与 active colleges，列表
   assert.equal(fixture.state.audits[0].resourceId, 'usr_security_001');
 });
 
+test('2a. 短身份编号不泄露完整值，长编号保持最小展示掩码', () => {
+  assert.equal(maskIdentityNo('T01'), 'T*1');
+  assert.equal(maskIdentityNo('T001'), 'T**1');
+  assert.equal(maskIdentityNo('20260001'), '20****01');
+  assert.notEqual(maskIdentityNo('T01'), 'T01');
+  assert.notEqual(maskIdentityNo('T001'), 'T001');
+});
+
 test('3. POST identities 可事务创建 student 与 counselor，服务端固定身份字段', async () => {
   const studentFixture = await createFixture();
   const student = await request(studentFixture, {
@@ -354,6 +363,49 @@ test('5. 创建拒绝不存在或停用学院，UNIQUE 冲突映射为 CONFLICT'
     body: JSON.stringify({ role: 'student', identityNo: '20260001', name: '重复身份', collegeId: 'college_cs' }),
   });
   assert.equal(duplicate.json.code, 'CONFLICT');
+});
+
+test('5a. 创建在事务内拒绝跨角色同身份编号，且不新增 users 或 audit', async () => {
+  const studentFixture = await createFixture({
+    users: [await securityUser(), identityUser({ identityKey: 'student:10001', studentNo: '10001' })],
+  });
+  const counselorConflict = await request(studentFixture, {
+    method: 'POST', path: '/identities', headers: authorization(studentFixture.token),
+    body: JSON.stringify({ role: 'counselor', identityNo: '10001', name: '辅导员冲突', collegeId: 'college_cs' }),
+  });
+  assert.equal(counselorConflict.json.code, 'CONFLICT');
+  assert.equal(studentFixture.state.users.filter((user) => user._id === 'usr_created_001').length, 0);
+  assert.equal(studentFixture.state.audits.length, 0);
+
+  const counselorFixture = await createFixture({
+    users: [await securityUser(), identityUser({
+      _id: 'usr_counselor_001', identityKey: 'counselor:10001', role: 'counselor', studentNo: null, staffNo: '10001',
+      wxIdentityKey: 'unbound:usr_counselor_001', wxOpenId: null, bindStatus: 'unbound',
+    })],
+  });
+  const studentConflict = await request(counselorFixture, {
+    method: 'POST', path: '/identities', headers: authorization(counselorFixture.token),
+    body: JSON.stringify({ role: 'student', identityNo: '10001', name: '学生冲突', collegeId: 'college_cs' }),
+  });
+  assert.equal(studentConflict.json.code, 'CONFLICT');
+  assert.equal(counselorFixture.state.users.filter((user) => user._id === 'usr_created_001').length, 0);
+  assert.equal(counselorFixture.state.audits.length, 0);
+});
+
+test('5b. 不同编号的 student 与 counselor 仍可正常创建', async () => {
+  const studentFixture = await createFixture();
+  const student = await request(studentFixture, {
+    method: 'POST', path: '/identities', headers: authorization(studentFixture.token),
+    body: JSON.stringify({ role: 'student', identityNo: '20269999', name: '学生新', collegeId: 'college_cs' }),
+  });
+  assert.equal(student.json.code, 'IDENTITY_CREATED');
+
+  const counselorFixture = await createFixture();
+  const counselor = await request(counselorFixture, {
+    method: 'POST', path: '/identities', headers: authorization(counselorFixture.token),
+    body: JSON.stringify({ role: 'counselor', identityNo: 'T20001', name: '辅导员新', collegeId: 'college_cs' }),
+  });
+  assert.equal(counselor.json.code, 'IDENTITY_CREATED');
 });
 
 test('6. create 的 users 与 audit 同事务，审计不记录姓名、身份编号或 OPENID', async () => {
