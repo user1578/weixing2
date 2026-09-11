@@ -13,6 +13,28 @@ const ALERT_CREATE_INPUT_KEYS = new Set(['studentNo', 'fraudType', 'content', 's
 const ALERT_CREATE_REQUIRED_INPUT_KEYS = new Set(['studentNo', 'fraudType', 'content']);
 const ALERT_DISPATCH_INPUT_KEYS = new Set(['version']);
 const REPORT_START_PROCESS_INPUT_KEYS = new Set(['version', 'actionContent']);
+const REPORT_CLOSE_INPUT_KEYS = new Set([
+  'version',
+  'verificationResult',
+  'finalOutcome',
+  'confirmedLossAmount',
+  'closeReason',
+  'actionContent',
+]);
+const ALLOWED_REPORT_CLOSE_VERIFICATION_RESULTS = new Set([
+  'confirmed',
+  'suspected',
+  'misreport',
+  'consultation',
+  'not_fraud',
+]);
+const ALLOWED_REPORT_CLOSE_FINAL_OUTCOMES = new Set([
+  'loss_confirmed',
+  'loss_no_loss',
+  'misreport',
+  'consultation',
+]);
+const REPORT_CLOSE_SOURCE_STATUSES = new Set(['pending_security_verify', 'in_process']);
 const ALLOWED_FRAUD_TYPES = new Set([
   'part_time_scam',
   'impersonate_public',
@@ -25,6 +47,7 @@ const MAX_STUDENT_NO_LENGTH = 64;
 const MAX_ALERT_CONTENT_LENGTH = 1000;
 const MAX_SOURCE_REFERENCE_LENGTH = 128;
 const MAX_ACTION_CONTENT_LENGTH = 1000;
+const MAX_CLOSE_REASON_LENGTH = 1000;
 
 const ERROR_MESSAGES = {
   INVALID_INPUT: '请求内容无效',
@@ -158,6 +181,33 @@ function parseReportStartProcessBody(body) {
   }
   const actionContent = normalizeRequiredString(parsed.actionContent, MAX_ACTION_CONTENT_LENGTH);
   return actionContent ? { version: parsed.version, actionContent } : null;
+}
+
+function parseReportCloseBody(body) {
+  const parsed = parseJsonObjectBody(body);
+  if (!parsed || !hasOnlyAllowedKeys(parsed, REPORT_CLOSE_INPUT_KEYS, REPORT_CLOSE_INPUT_KEYS) ||
+    !Number.isSafeInteger(parsed.version) || parsed.version <= 0 ||
+    typeof parsed.verificationResult !== 'string' || !ALLOWED_REPORT_CLOSE_VERIFICATION_RESULTS.has(parsed.verificationResult) ||
+    typeof parsed.finalOutcome !== 'string' || !ALLOWED_REPORT_CLOSE_FINAL_OUTCOMES.has(parsed.finalOutcome) ||
+    typeof parsed.confirmedLossAmount !== 'number' || !Number.isFinite(parsed.confirmedLossAmount) || parsed.confirmedLossAmount < 0) {
+    return null;
+  }
+
+  if ((parsed.finalOutcome === 'loss_confirmed' && parsed.confirmedLossAmount <= 0) ||
+    (parsed.finalOutcome !== 'loss_confirmed' && parsed.confirmedLossAmount !== 0)) {
+    return null;
+  }
+
+  const closeReason = normalizeRequiredString(parsed.closeReason, MAX_CLOSE_REASON_LENGTH);
+  const actionContent = normalizeRequiredString(parsed.actionContent, MAX_ACTION_CONTENT_LENGTH);
+  return closeReason && actionContent ? {
+    version: parsed.version,
+    verificationResult: parsed.verificationResult,
+    finalOutcome: parsed.finalOutcome,
+    confirmedLossAmount: parsed.confirmedLossAmount,
+    closeReason,
+    actionContent,
+  } : null;
 }
 
 function businessError(code) {
@@ -602,6 +652,23 @@ function createReportStartProcessAudit({ reportId, actorId, requestId, serverDat
   };
 }
 
+function createReportCloseAudit({ reportId, actorId, beforeStatus, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'report.close',
+    resourceType: 'fraud_report',
+    resourceId: reportId,
+    result: 'success',
+    beforeSummary: { status: beforeStatus },
+    afterSummary: { status: 'closed' },
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
 function createSecurityAlertService({
   authService,
   db,
@@ -939,6 +1006,120 @@ function createSecurityReportProcessingService({
   return { startProcess };
 }
 
+function createSecurityReportClosingService({
+  authService,
+  db,
+  serverDate,
+  createDispositionId = () => `disposition_${crypto.randomUUID().replace(/-/g, '')}`,
+  createAuditId = () => `audit_${crypto.randomUUID().replace(/-/g, '')}`,
+  createRequestId = () => crypto.randomUUID(),
+  logger = console,
+  configured = true,
+} = {}) {
+  const dependenciesReady = configured &&
+    authService && typeof authService.authenticateSecuritySession === 'function' &&
+    db && typeof db.runTransaction === 'function' && typeof db.collection === 'function' &&
+    typeof serverDate === 'function';
+
+  function internalFailure(requestId, stage, resourceId = null) {
+    safeLog(logger, { requestId, code: 'INTERNAL_ERROR', resourceId, stage });
+    return failure('INTERNAL_ERROR');
+  }
+
+  async function authenticate(authorization, requestId) {
+    try {
+      return await authService.authenticateSecuritySession(authorization);
+    } catch (error) {
+      return { ok: false, result: internalFailure(requestId, 'securityReportCloseAuthentication') };
+    }
+  }
+
+  async function close(authorization, reportId, body) {
+    const requestId = createRequestId();
+    const input = parseReportCloseBody(body);
+    if (!input) {
+      return failure('INVALID_INPUT');
+    }
+    if (!dependenciesReady) {
+      return internalFailure(requestId, 'securityReportCloseConfiguration', reportId || null);
+    }
+
+    const authenticated = await authenticate(authorization, requestId);
+    if (!authenticated.ok) {
+      return authenticated.result;
+    }
+
+    const dispositionId = createDispositionId();
+    const auditId = createAuditId();
+    try {
+      const report = await db.runTransaction(async (transaction) => {
+        const currentReport = await findRecordById(transaction, 'fraud_reports', reportId);
+        if (!currentReport) {
+          throw businessError('NOT_FOUND');
+        }
+        if (!REPORT_CLOSE_SOURCE_STATUSES.has(currentReport.status) || currentReport.version !== input.version) {
+          throw businessError('CONFLICT');
+        }
+
+        const updateResult = ensureDatabaseResult(await transaction.collection('fraud_reports').where({
+          _id: currentReport._id,
+          status: currentReport.status,
+          version: input.version,
+        }).update({
+          status: 'closed',
+          currentHandlerId: authenticated.user._id,
+          finalOutcome: input.finalOutcome,
+          confirmedLossAmount: input.confirmedLossAmount,
+          closeReason: input.closeReason,
+          closedAt: serverDate(),
+          updatedAt: serverDate(),
+          version: input.version + 1,
+        }));
+        if (updatedCount(updateResult) !== 1) {
+          throw businessError('CONFLICT');
+        }
+
+        ensureSuccessfulInsert(await transaction.collection('security_dispositions').add({
+          _id: dispositionId,
+          reportId: currentReport._id,
+          operatorId: authenticated.user._id,
+          action: 'close',
+          statusAfter: 'closed',
+          verificationResult: input.verificationResult,
+          actionContent: input.actionContent,
+          confirmedLossAmount: input.confirmedLossAmount,
+          finalOutcome: input.finalOutcome,
+          createdAt: serverDate(),
+        }));
+        ensureSuccessfulInsert(await transaction.collection('audit_logs').add(createReportCloseAudit({
+          reportId: currentReport._id,
+          actorId: authenticated.user._id,
+          beforeStatus: currentReport.status,
+          requestId,
+          serverDate,
+          createAuditId: () => auditId,
+        })));
+        return {
+          reportId: currentReport._id,
+          status: 'closed',
+          version: input.version + 1,
+        };
+      });
+      return success('REPORT_CLOSED', { report });
+    } catch (error) {
+      if (error && error.isBusinessError) {
+        return failure(error.businessCode);
+      }
+      if (isTransactionConflict(error)) {
+        return failure('CONFLICT');
+      }
+      return internalFailure(requestId, 'securityReportCloseTransaction', reportId || null);
+    }
+  }
+
+  return { close };
+}
+
 function readHeader(headers, name) {
   if (!headers || typeof headers !== 'object') {
     return undefined;
@@ -1031,7 +1212,12 @@ function getReportStartProcessId(path) {
   return match ? match[1] : null;
 }
 
-function createHttpHandler({ authService, alertService = null, reportProcessingService = null, allowedOrigins, logger = console }) {
+function getReportCloseId(path) {
+  const match = /^\/reports\/([^/]+)\/close$/.exec(path);
+  return match ? match[1] : null;
+}
+
+function createHttpHandler({ authService, alertService = null, reportProcessingService = null, reportClosingService = null, allowedOrigins, logger = console }) {
   if (!authService || typeof authService.login !== 'function' || typeof authService.session !== 'function') {
     throw new Error('securityAuthHttp requires an authentication service');
   }
@@ -1045,7 +1231,7 @@ function createHttpHandler({ authService, alertService = null, reportProcessingS
         ? 'POST, OPTIONS'
         : path === '/session'
           ? 'GET, OPTIONS'
-          : (path === '/alerts' || getAlertDispatchId(path) || getReportStartProcessId(path))
+          : (path === '/alerts' || getAlertDispatchId(path) || getReportStartProcessId(path) || getReportCloseId(path))
             ? 'POST, OPTIONS'
             : null;
       if (!allowedMethods) {
@@ -1093,6 +1279,17 @@ function createHttpHandler({ authService, alertService = null, reportProcessingS
         return httpResponse(await reportProcessingService.startProcess(
           readHeader(event && event.headers, 'authorization'),
           reportId,
+          event && event.body,
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      const closeReportId = getReportCloseId(path);
+      if (method === 'POST' && closeReportId) {
+        if (!reportClosingService || typeof reportClosingService.close !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await reportClosingService.close(
+          readHeader(event && event.headers, 'authorization'),
+          closeReportId,
           event && event.body,
         ), buildResponseHeaders(origin, originWhitelist));
       }
@@ -1172,7 +1369,21 @@ function createDefaultHandler(options = {}) {
       logger,
       configured: dependencies.configured,
     });
-    return createHttpHandler({ authService, alertService, reportProcessingService, allowedOrigins: environment.SECURITY_WEB_ALLOWED_ORIGINS, logger });
+    const reportClosingService = createSecurityReportClosingService({
+      authService,
+      db: dependencies.db,
+      serverDate: dependencies.serverDate,
+      logger,
+      configured: dependencies.configured,
+    });
+    return createHttpHandler({
+      authService,
+      alertService,
+      reportProcessingService,
+      reportClosingService,
+      allowedOrigins: environment.SECURITY_WEB_ALLOWED_ORIGINS,
+      logger,
+    });
   } catch (error) {
     const unavailableService = {
       login: async () => failure('INTERNAL_ERROR'),
@@ -1243,17 +1454,21 @@ exports.__testables = {
   createDefaultHandler,
   createHttpHandler,
   createSecurityAlertService,
+  createSecurityReportClosingService,
   createSecurityReportProcessingService,
   calculateManualAlertRisk,
   createLoginAudit,
+  createReportCloseAudit,
   createReportStartProcessAudit,
   getAlertDispatchId,
+  getReportCloseId,
   getReportStartProcessId,
   createNodeServer,
   mintSessionToken,
   normalizeLoginName,
   parseAlertCreateBody,
   parseAlertDispatchBody,
+  parseReportCloseBody,
   parseReportStartProcessBody,
   parseAllowedOrigins,
   parseLoginBody,
