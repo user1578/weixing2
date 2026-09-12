@@ -1,0 +1,8 @@
+{
+  "name": "complete-learning-article",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

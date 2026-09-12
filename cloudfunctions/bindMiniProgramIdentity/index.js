@@ -26,7 +26,6 @@ function toProfile(user) {
     role: user.role,
     name: user.name,
     collegeId: user.collegeId,
-    focusFlag: user.focusFlag,
   };
 }
 

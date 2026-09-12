@@ -476,7 +476,7 @@ test('42. 正常 BOUND session 仍只返回最小 profile 且不写成功审计'
   const user = baseUser({ wxIdentityKey: 'openid:trusted-openid', wxOpenId: 'trusted-openid', bindStatus: 'bound', passwordHash: 'secret', mobile: '13800138000' });
   const { handler, state } = makeSession([user], trustedContext);
   const response = await handler();
-  assert.deepEqual(Object.keys(response.profile).sort(), ['collegeId', 'focusFlag', 'name', 'role', 'userId']);
+  assert.deepEqual(Object.keys(response.profile).sort(), ['collegeId', 'name', 'role', 'userId']);
   assert.equal(JSON.stringify(response).includes('trusted-openid'), false);
   assert.equal(state.audits.length, 0);
 });

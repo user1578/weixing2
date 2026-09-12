@@ -20,7 +20,6 @@ function toProfile(user, collegeName = '') {
     role: user.role,
     name: user.name,
     collegeId: user.collegeId,
-    focusFlag: user.focusFlag,
   };
   if (typeof collegeName === 'string' && collegeName.trim()) {
     profile.collegeName = collegeName.trim();

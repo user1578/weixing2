@@ -412,7 +412,7 @@ test('32. 审计不含 OPENID、姓名、学号或工号', async () => {
 test('33. 返回 profile 不含身份或版本敏感字段', async () => {
   const { handler } = makeSwitch();
   const response = await handler({ targetRole: 'counselor' });
-  assert.deepEqual(Object.keys(response.profile).sort(), ['collegeId', 'focusFlag', 'name', 'role', 'userId']);
+  assert.deepEqual(Object.keys(response.profile).sort(), ['collegeId', 'name', 'role', 'userId']);
   const serialized = JSON.stringify(response.profile);
   for (const secret of ['wxOpenId', 'wxIdentityKey', 'identityKey', 'studentNo', 'staffNo', 'version', trustedContext.OPENID]) assert.equal(serialized.includes(secret), false, secret);
 });
