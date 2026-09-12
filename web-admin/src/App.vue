@@ -53,6 +53,14 @@ const collegeSaving = ref(false);
 const collegeActionLoading = ref("");
 const showCollegeCreatePanel = ref(false);
 const collegeName = ref("");
+const reportQueues = ref({ pendingSecurityVerify: [], inProcess: [], closed: [] });
+const reportsLoading = ref(false);
+const activeReportTab = ref("pendingSecurityVerify");
+const selectedReport = ref(null);
+const reportDetailLoading = ref(false);
+const reportActionLoading = ref(false);
+const reportActionMode = ref("");
+const reportActionForm = ref({ actionContent: "", verificationResult: "suspected", returnReason: "", finalOutcome: "loss_no_loss", confirmedLossAmount: "0", closeReason: "" });
 const isAuthenticated = computed(() => profile.value !== null);
 const canDispatch = computed(() => createdAlert.value?.status === "pending_dispatch");
 const identityNoHint = computed(() => identityForm.value.role === "student" ? "身份编号填写学号" : "身份编号填写工号");
@@ -94,6 +102,9 @@ function clearSession() {
   colleges.value = [];
   dashboard.value = null;
   managedColleges.value = [];
+  reportQueues.value = { pendingSecurityVerify: [], inProcess: [], closed: [] };
+  selectedReport.value = null;
+  reportActionMode.value = "";
   activeView.value = "dashboard";
   showIdentityCreatePanel.value = false;
   showCollegeCreatePanel.value = false;
@@ -235,6 +246,25 @@ function isDashboardPayload(payload) {
     Array.isArray(payload.recentAlerts) && payload.recentAlerts.length <= 5 && payload.recentAlerts.every((item) => isDashboardItem(item, "alertId"));
 }
 
+function isReportListItem(report) {
+  return Boolean(report) && typeof report.reportId === "string" && report.reportId &&
+    typeof report.fraudType === "string" && typeof report.riskLevel === "string" &&
+    typeof report.status === "string" && typeof report.collegeName === "string" &&
+    Number.isSafeInteger(report.version) && report.version > 0 && typeof report.hasLoss === "boolean";
+}
+
+function isReportQueuesPayload(payload) {
+  const queues = payload?.queues;
+  return payload?.code === "REPORTS_LOADED" && queues && ["pendingSecurityVerify", "inProcess", "closed"].every((key) =>
+    Array.isArray(queues[key]) && queues[key].length <= 50 && queues[key].every(isReportListItem));
+}
+
+function isReportDetailPayload(payload) {
+  return payload?.code === "REPORT_DETAIL_LOADED" && payload.report && typeof payload.report.reportId === "string" &&
+    Number.isSafeInteger(payload.report.version) && payload.student && typeof payload.student.name === "string" &&
+    Array.isArray(payload.followups) && Array.isArray(payload.dispositions);
+}
+
 function resetIdentityForm() {
   identityForm.value = { name: "", role: "student", identityNo: "", collegeId: colleges.value[0]?.collegeId || "" };
 }
@@ -253,8 +283,102 @@ function selectNavigation(view) {
   successMessage.value = "";
   message.value = "";
   if (view === "dashboard") void loadDashboard();
+  if (view === "reports") void loadReports();
   if (view === "identities") void loadIdentities();
   if (view === "colleges") void loadColleges();
+}
+
+async function loadReports() {
+  if (reportsLoading.value || !isAuthenticated.value || !requireApiBaseUrl()) return;
+  reportsLoading.value = true;
+  try {
+    const response = await fetch(`${apiBaseUrl}/security/reports`, { method: "GET", headers: { Authorization: `Bearer ${currentToken()}` } });
+    const payload = await readApiResponse(response);
+    if (!isReportQueuesPayload(payload)) throw new ApiError("INTERNAL_ERROR");
+    reportQueues.value = {
+      pendingSecurityVerify: payload.queues.pendingSecurityVerify.map((report) => ({ ...report })),
+      inProcess: payload.queues.inProcess.map((report) => ({ ...report })),
+      closed: payload.queues.closed.map((report) => ({ ...report })),
+    };
+    message.value = "";
+  } catch (error) { handleApiError(error); }
+  finally { reportsLoading.value = false; }
+}
+
+async function loadReportDetail(reportId) {
+  if (!reportId || reportDetailLoading.value || !requireApiBaseUrl()) return;
+  reportDetailLoading.value = true;
+  try {
+    const response = await fetch(`${apiBaseUrl}/security/reports/${encodeURIComponent(reportId)}`, { method: "GET", headers: { Authorization: `Bearer ${currentToken()}` } });
+    const payload = await readApiResponse(response);
+    if (!isReportDetailPayload(payload)) throw new ApiError("INTERNAL_ERROR");
+    selectedReport.value = {
+      report: { ...payload.report }, student: { name: payload.student.name, studentNo: payload.student.studentNo },
+      followups: payload.followups.map((followup) => ({ ...followup })), dispositions: payload.dispositions.map((disposition) => ({ ...disposition })),
+    };
+    reportActionMode.value = "";
+    message.value = "";
+  } catch (error) { handleApiError(error); }
+  finally { reportDetailLoading.value = false; }
+}
+
+function openReport(reportId) {
+  activeView.value = "reports";
+  successMessage.value = "";
+  message.value = "";
+  void loadReports();
+  void loadReportDetail(reportId);
+}
+
+function resetReportActionForm() {
+  reportActionForm.value = { actionContent: "", verificationResult: "suspected", returnReason: "", finalOutcome: "loss_no_loss", confirmedLossAmount: "0", closeReason: "" };
+}
+
+function openReportAction(mode) {
+  resetReportActionForm();
+  reportActionMode.value = mode;
+}
+
+function closeReportAction() {
+  if (!reportActionLoading.value) reportActionMode.value = "";
+}
+
+async function runReportAction() {
+  const detail = selectedReport.value;
+  if (!detail || reportActionLoading.value || !requireApiBaseUrl()) return;
+  const report = detail.report;
+  const form = reportActionForm.value;
+  let path = "";
+  let body = null;
+  if (reportActionMode.value === "start") {
+    if (!form.actionContent.trim() || form.actionContent.trim().length > 1000) return setError("INVALID_INPUT");
+    path = `/reports/${encodeURIComponent(report.reportId)}/start-process`;
+    body = { version: report.version, actionContent: form.actionContent.trim() };
+  } else if (reportActionMode.value === "return") {
+    if (!form.returnReason.trim() || form.returnReason.trim().length > 1000 || !form.actionContent.trim() || form.actionContent.trim().length > 2000) return setError("INVALID_INPUT");
+    path = `/security/reports/${encodeURIComponent(report.reportId)}/return`;
+    body = { version: report.version, verificationResult: form.verificationResult, returnReason: form.returnReason.trim(), actionContent: form.actionContent.trim() };
+  } else if (reportActionMode.value === "close") {
+    const confirmedLossAmount = Number(form.confirmedLossAmount);
+    const validOutcome = ["loss_confirmed", "loss_no_loss", "misreport", "consultation"].includes(form.finalOutcome);
+    if (!validOutcome || !Number.isFinite(confirmedLossAmount) || confirmedLossAmount < 0 || !form.closeReason.trim() || form.closeReason.trim().length > 1000 || !form.actionContent.trim() || form.actionContent.trim().length > 1000 ||
+      (form.finalOutcome === "loss_confirmed" ? confirmedLossAmount <= 0 : confirmedLossAmount !== 0)) return setError("INVALID_INPUT");
+    path = `/reports/${encodeURIComponent(report.reportId)}/close`;
+    body = { version: report.version, verificationResult: form.verificationResult, finalOutcome: form.finalOutcome, confirmedLossAmount, closeReason: form.closeReason.trim(), actionContent: form.actionContent.trim() };
+  } else return;
+  reportActionLoading.value = true;
+  message.value = "";
+  successMessage.value = "";
+  try {
+    const response = await fetch(`${apiBaseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentToken()}` }, body: JSON.stringify(body) });
+    const payload = await readApiResponse(response);
+    if (!["REPORT_PROCESSING_STARTED", "REPORT_RETURNED_TO_COUNSELOR", "REPORT_CLOSED"].includes(payload.code)) throw new ApiError("INTERNAL_ERROR");
+    successMessage.value = "工单操作已完成，已重新加载真实状态。";
+    reportActionMode.value = "";
+    await loadReports();
+    await loadReportDetail(report.reportId);
+  } catch (error) { handleApiError(error); }
+  finally { reportActionLoading.value = false; }
 }
 
 async function loadSession() {
@@ -739,7 +863,7 @@ onMounted(() => {
               <article class="panel dashboard-panel">
                 <h3>待办工单</h3>
                 <p v-if="dashboard.pendingReports.length === 0" class="table-state">当前暂无待处理工单</p>
-                <div v-else class="table-scroll"><table class="dashboard-table"><thead><tr><th>诈骗类型</th><th>风险等级</th><th>状态</th><th>学院</th><th>时间</th></tr></thead><tbody><tr v-for="report in dashboard.pendingReports" :key="report.reportId"><td>{{ fraudTypeLabel(report.fraudType) }}</td><td>{{ riskLevelLabel(report.riskLevel) }}</td><td>{{ statusLabel(report.status) }}</td><td>{{ report.collegeName || "—" }}</td><td>{{ displayDate(report.createdAt) }}</td></tr></tbody></table></div>
+                <div v-else class="table-scroll"><table class="dashboard-table"><thead><tr><th>诈骗类型</th><th>风险等级</th><th>状态</th><th>学院</th><th>时间</th></tr></thead><tbody><tr v-for="report in dashboard.pendingReports" :key="report.reportId" class="clickable-row" @click="openReport(report.reportId)"><td>{{ fraudTypeLabel(report.fraudType) }}</td><td>{{ riskLevelLabel(report.riskLevel) }}</td><td>{{ statusLabel(report.status) }}</td><td>{{ report.collegeName || "—" }}</td><td>{{ displayDate(report.createdAt) }}</td></tr></tbody></table></div>
               </article>
               <article class="panel dashboard-panel">
                 <h3>最新预警</h3>
@@ -808,10 +932,13 @@ onMounted(() => {
           </section>
         </template>
 
-        <section v-else-if="activeView === 'reports'" class="panel welcome-panel" aria-labelledby="reports-title">
-          <p class="eyebrow">工单管理</p>
-          <h2 id="reports-title">功能完善中</h2>
-          <p>本轮不展示或伪造任何工单数据。</p>
+        <section v-else-if="activeView === 'reports'" class="reports-page" aria-labelledby="reports-title">
+          <header class="section-page-header"><div><p class="eyebrow">工单管理</p><h2 id="reports-title">保卫处工单队列</h2><p>只展示已通过保卫处会话授权读取的真实工单。</p></div><button type="button" class="secondary-button" :disabled="reportsLoading" @click="loadReports">{{ reportsLoading ? '刷新中…' : '刷新队列' }}</button></header>
+          <div class="report-tabs" role="tablist"><button type="button" :class="{ active: activeReportTab === 'pendingSecurityVerify' }" @click="activeReportTab = 'pendingSecurityVerify'">待核验（{{ reportQueues.pendingSecurityVerify.length }}）</button><button type="button" :class="{ active: activeReportTab === 'inProcess' }" @click="activeReportTab = 'inProcess'">处理中（{{ reportQueues.inProcess.length }}）</button><button type="button" :class="{ active: activeReportTab === 'closed' }" @click="activeReportTab = 'closed'">已结案（{{ reportQueues.closed.length }}）</button></div>
+          <section class="panel identity-panel"><p v-if="reportsLoading" class="table-state">正在加载工单队列…</p><p v-else-if="reportQueues[activeReportTab].length === 0" class="table-state">当前队列暂无工单。</p><div v-else class="table-scroll"><table class="identity-table report-table"><thead><tr><th>风险等级</th><th>诈骗类型</th><th>学院</th><th>状态</th><th>提交时间</th><th>是否损失</th><th>操作</th></tr></thead><tbody><tr v-for="report in reportQueues[activeReportTab]" :key="report.reportId"><td>{{ riskLevelLabel(report.riskLevel) }}</td><td>{{ fraudTypeLabel(report.fraudType) }}</td><td>{{ report.collegeName || '—' }}</td><td>{{ statusLabel(report.status) }}</td><td>{{ displayDate(report.submittedAt) }}</td><td>{{ report.hasLoss ? '是' : '否' }}</td><td><button type="button" class="text-button" @click="loadReportDetail(report.reportId)">查看详情</button></td></tr></tbody></table></div></section>
+          <section v-if="reportDetailLoading" class="panel table-state">正在加载工单详情…</section>
+          <section v-else-if="selectedReport" class="panel report-detail" aria-live="polite"><header class="result-header"><div><p class="eyebrow">工单详情</p><h3>{{ fraudTypeLabel(selectedReport.report.fraudType) }}</h3></div><button type="button" class="secondary-button" @click="selectedReport = null">关闭详情</button></header><dl class="result-list"><div><dt>学生</dt><dd>{{ selectedReport.student.name }}（{{ selectedReport.student.studentNo }}）</dd></div><div><dt>学院</dt><dd>{{ selectedReport.report.collegeName || '—' }}</dd></div><div><dt>状态</dt><dd>{{ statusLabel(selectedReport.report.status) }}</dd></div><div><dt>风险等级</dt><dd>{{ riskLevelLabel(selectedReport.report.riskLevel) }}</dd></div><div><dt>事件时间</dt><dd>{{ displayDate(selectedReport.report.incidentAt) }}</dd></div><div><dt>涉及金额</dt><dd>{{ selectedReport.report.involvedAmount }}</dd></div><div><dt>是否损失</dt><dd>{{ selectedReport.report.hasLoss ? '是' : '否' }}</dd></div><div><dt>事件经过</dt><dd class="breakable">{{ selectedReport.report.incidentNarrative }}</dd></div><div><dt>可疑平台/账号</dt><dd class="breakable">{{ selectedReport.report.suspiciousPlatform || '—' }} / {{ selectedReport.report.suspiciousAccount || '—' }}</dd></div><div><dt>联系电话</dt><dd>{{ selectedReport.report.contactPhone || '—' }}</dd></div><div><dt>学生补充</dt><dd class="breakable">{{ selectedReport.report.studentRemark || '—' }}</dd></div><div><dt>结案结果</dt><dd>{{ selectedReport.report.finalOutcome || '—' }}</dd></div><div><dt>确认损失金额</dt><dd>{{ selectedReport.report.confirmedLossAmount ?? '—' }}</dd></div><div><dt>结案时间</dt><dd>{{ displayDate(selectedReport.report.closedAt) }}</dd></div></dl><div class="report-actions" v-if="selectedReport.report.status === 'pending_security_verify'"><button type="button" @click="openReportAction('return')">退回辅导员</button><button type="button" @click="openReportAction('start')">确认并开始处置</button><button type="button" class="secondary-button" @click="openReportAction('close')">直接结案</button></div><div class="report-actions" v-else-if="selectedReport.report.status === 'in_process'"><button type="button" @click="openReportAction('close')">结案</button></div><p v-else class="table-state">已结案工单仅可只读查看历史。</p><section class="workflow-history"><h4>辅导员跟进记录</h4><p v-if="selectedReport.followups.length === 0">暂无跟进记录。</p><ul v-else><li v-for="followup in selectedReport.followups" :key="followup.followupId">{{ followup.status }} · {{ followup.contactMethod || '未联系' }} · {{ displayDate(followup.contactedAt || followup.createdAt) }}</li></ul><h4>保卫处处置记录</h4><p v-if="selectedReport.dispositions.length === 0">暂无处置记录。</p><ul v-else><li v-for="(disposition, index) in selectedReport.dispositions" :key="`${disposition.action}-${index}`">{{ disposition.action }} · {{ disposition.statusAfter }} · {{ displayDate(disposition.createdAt) }}</li></ul></section></section>
+          <div v-if="reportActionMode && selectedReport" class="modal-backdrop" @click.self="closeReportAction"><section class="identity-modal" role="dialog" aria-modal="true" aria-labelledby="report-action-title"><header class="modal-header"><div><h2 id="report-action-title">{{ reportActionMode === 'return' ? '退回辅导员' : reportActionMode === 'start' ? '确认并开始处置' : '结案' }}</h2><p>提交后以服务端事务结果为准。</p></div><button type="button" class="secondary-button" :disabled="reportActionLoading" @click="closeReportAction">关闭</button></header><form class="identity-form" @submit.prevent="runReportAction"><template v-if="reportActionMode === 'return'"><label>核验结果<select v-model="reportActionForm.verificationResult"><option value="confirmed">已确认</option><option value="suspected">疑似</option><option value="misreport">误报</option><option value="consultation">咨询</option><option value="not_fraud">非诈骗</option></select></label><label>退回原因<textarea v-model="reportActionForm.returnReason" maxlength="1000" required /></label></template><template v-if="reportActionMode === 'close'"><label>核验结果<select v-model="reportActionForm.verificationResult"><option value="confirmed">已确认</option><option value="suspected">疑似</option><option value="misreport">误报</option><option value="consultation">咨询</option><option value="not_fraud">非诈骗</option></select></label><label>结案结果<select v-model="reportActionForm.finalOutcome"><option value="loss_confirmed">确认损失</option><option value="loss_no_loss">未确认损失</option><option value="misreport">误报</option><option value="consultation">咨询</option></select></label><label>确认损失金额<input v-model="reportActionForm.confirmedLossAmount" type="number" min="0" step="0.01" required /></label><label>结案原因<textarea v-model="reportActionForm.closeReason" maxlength="1000" required /></label></template><label>处置说明<textarea v-model="reportActionForm.actionContent" :maxlength="reportActionMode === 'return' ? 2000 : 1000" required /></label><button type="submit" :disabled="reportActionLoading">{{ reportActionLoading ? '提交中…' : '确认提交' }}</button></form></section></div>
         </section>
 
         <section v-else-if="activeView === 'identities'" class="identity-page" aria-labelledby="identities-title">

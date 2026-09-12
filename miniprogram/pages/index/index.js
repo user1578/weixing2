@@ -59,25 +59,28 @@ function sameProfile(left, right) {
   return Boolean(left) && Boolean(right) && left.userId === right.userId && left.role === right.role;
 }
 
-function buildStudentSummary(alerts) {
+function buildStudentSummary(alerts, reports = []) {
   const rows = Array.isArray(alerts) ? alerts.filter((alert) => alert && typeof alert === "object") : [];
+  const reportRows = Array.isArray(reports) ? reports.filter((report) => report && typeof report === "object") : [];
   return {
     highRiskCount: rows.filter((alert) => alert.riskLevel === "high").length,
     pendingAlertCount: rows.filter((alert) => alert.status === "sent").length,
     followingAlertCount: rows.filter((alert) => alert.status === "following_up").length,
-    reportCountText: "—",
-    reportHint: "现有服务暂未提供我的工单汇总",
+    reportCountText: String(reportRows.length),
+    reportHint: "本人正在处理的工单数量",
   };
 }
 
-function buildCounselorSummary(reports) {
+function buildCounselorSummary(reports, following = [], history = []) {
   const rows = Array.isArray(reports) ? reports.filter((report) => report && typeof report === "object") : [];
+  const followingRows = Array.isArray(following) ? following.filter((report) => report && typeof report === "object") : [];
+  const historyRows = Array.isArray(history) ? history.filter((report) => report && typeof report === "object") : [];
   return {
     pendingVerifyCount: rows.length,
     highRiskCount: rows.filter((report) => report.riskLevel === "high").length,
-    followingCountText: "—",
-    recordCountText: "—",
-    unavailableHint: "现有服务暂未提供聚合数据",
+    followingCountText: String(followingRows.length),
+    recordCountText: String(historyRows.length),
+    unavailableHint: `工单记录 ${historyRows.length} 项`,
   };
 }
 
@@ -180,18 +183,23 @@ const pageDefinition = {
   async loadWorkbenchData(profile) {
     if (!profile || !ROLE_LABELS[profile.role]) return;
     this.setData({ workbenchLoading: true, workbenchNotice: "" });
-    const functionName = profile.role === "student" ? "getStudentAlerts" : "getCounselorReports";
     try {
-      const response = await wx.cloud.callFunction({ name: functionName, data: {} });
-      const result = response.result || {};
-      if (!result.ok || !sameProfile(this.data.profile, profile)) {
+      const responses = profile.role === "student"
+        ? await Promise.all([wx.cloud.callFunction({ name: "getStudentAlerts", data: {} }), wx.cloud.callFunction({ name: "getStudentReports", data: {} })])
+        : await Promise.all([
+          wx.cloud.callFunction({ name: "getCounselorReports", data: { scope: "pending" } }),
+          wx.cloud.callFunction({ name: "getCounselorReports", data: { scope: "following" } }),
+          wx.cloud.callFunction({ name: "getCounselorReports", data: { scope: "history" } }),
+        ]);
+      const results = responses.map((response) => response.result || {});
+      if (results.some((result) => !result.ok) || !sameProfile(this.data.profile, profile)) {
         if (sameProfile(this.data.profile, profile)) this.setData({ workbenchNotice: "工作台数据暂时无法加载，请下拉刷新重试。" });
         return;
       }
       if (profile.role === "student") {
-        this.setData({ studentSummary: buildStudentSummary(result.alerts) });
+        this.setData({ studentSummary: buildStudentSummary(results[0].alerts, results[1].reports) });
       } else {
-        this.setData({ counselorSummary: buildCounselorSummary(result.reports) });
+        this.setData({ counselorSummary: buildCounselorSummary(results[0].reports, results[1].reports, results[2].reports) });
       }
     } catch (error) {
       if (sameProfile(this.data.profile, profile)) this.setData({ workbenchNotice: "工作台数据暂时无法加载，请下拉刷新重试。" });
@@ -210,9 +218,15 @@ const pageDefinition = {
     wx.navigateTo({ url: "/pages/reports/create/index" });
   },
 
-  goToCounselorReports() {
+  goToStudentReports() {
+    if (!this.data.profile || this.data.profile.role !== "student") return;
+    wx.navigateTo({ url: "/pages/reports/mine/index" });
+  },
+
+  goToCounselorReports(event) {
     if (!this.data.profile || this.data.profile.role !== "counselor") return;
-    wx.navigateTo({ url: "/pages/counselor/reports/index" });
+    const scope = event && event.currentTarget && event.currentTarget.dataset ? event.currentTarget.dataset.scope : "pending";
+    wx.navigateTo({ url: `/pages/counselor/reports/index?scope=${scope === "following" || scope === "history" ? scope : "pending"}` });
   },
 
   goToBinding() {

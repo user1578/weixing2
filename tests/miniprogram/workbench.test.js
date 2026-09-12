@@ -27,7 +27,7 @@ function createPageInstance(definition, data = {}) {
   return instance;
 }
 
-function createWx({ sessions = [], studentAlerts = [], counselorReportLists = [] } = {}) {
+function createWx({ sessions = [], studentAlerts = [], studentReportLists = [], counselorReportLists = [] } = {}) {
   const calls = [];
   const toasts = [];
   const navigations = [];
@@ -40,6 +40,7 @@ function createWx({ sessions = [], studentAlerts = [], counselorReportLists = []
         calls.push(request);
         if (request.name === 'getMiniProgramSession') return { result: sessions.shift() || { ok: false, code: 'INTERNAL_ERROR' } };
         if (request.name === 'getStudentAlerts') return { result: studentAlerts.shift() || { ok: true, alerts: [] } };
+        if (request.name === 'getStudentReports') return { result: studentReportLists.shift() || { ok: true, reports: [] } };
         if (request.name === 'getCounselorReports') return { result: counselorReportLists.shift() || { ok: true, reports: [] } };
         throw new Error(`Unexpected function: ${request.name}`);
       },
@@ -58,6 +59,7 @@ test('1. 学生工作台只使用可信 session，并由已加载预警计算风
       { riskLevel: 'medium', status: 'sent' },
       { riskLevel: 'low', status: 'following_up' },
     ] }],
+    studentReportLists: [{ ok: true, reports: [{ status: 'in_process' }, { status: 'closed' }] }],
   });
   const instance = createPageInstance(workbench.pageDefinition);
   const loaded = await instance.refreshSession();
@@ -66,9 +68,9 @@ test('1. 学生工作台只使用可信 session，并由已加载预警计算风
   assert.equal(instance.data.profile.role, 'student');
   assert.deepEqual(instance.data.studentSummary, {
     highRiskCount: 1, pendingAlertCount: 2, followingAlertCount: 1,
-    reportCountText: '—', reportHint: '现有服务暂未提供我的工单汇总',
+    reportCountText: '2', reportHint: '本人正在处理的工单数量',
   });
-  assert.deepEqual(global.wx.calls.map((call) => call.name).sort(), ['getMiniProgramSession', 'getStudentAlerts']);
+  assert.deepEqual(global.wx.calls.map((call) => call.name).sort(), ['getMiniProgramSession', 'getStudentAlerts', 'getStudentReports']);
 });
 
 test('2. 辅导员工作台只调用既有学院工单查询，并计算待核验和高风险数', async () => {
@@ -77,15 +79,15 @@ test('2. 辅导员工作台只调用既有学院工单查询，并计算待核�
     counselorReportLists: [{ ok: true, reports: [
       { riskLevel: 'high', status: 'pending_counselor_verify' },
       { riskLevel: 'low', status: 'pending_counselor_verify' },
-    ] }],
+    ] }, { ok: true, reports: [{ status: 'pending_counselor_verify' }] }, { ok: true, reports: [{ status: 'closed' }, { status: 'in_process' }] }],
   });
   const instance = createPageInstance(workbench.pageDefinition);
   await instance.refreshSession();
 
   assert.equal(instance.data.profile.role, 'counselor');
   assert.deepEqual(instance.data.counselorSummary, {
-    pendingVerifyCount: 2, highRiskCount: 1, followingCountText: '—', recordCountText: '—',
-    unavailableHint: '现有服务暂未提供聚合数据',
+    pendingVerifyCount: 2, highRiskCount: 1, followingCountText: '1', recordCountText: '2',
+    unavailableHint: '工单记录 2 项',
   });
   assert.equal(global.wx.calls.some((call) => call.name === 'getStudentAlerts'), false);
   assert.equal(global.wx.calls.some((call) => call.name === 'getCounselorReports'), true);
@@ -124,7 +126,7 @@ test('9. 学生和辅导员入口只在当前角色匹配时导航到既有页�
   const counselor = createPageInstance(workbench.pageDefinition, { profile: workbench.normalizeProfile(COUNSELOR) });
   counselor.goToCounselorReports();
   counselor.goToStudentReport();
-  assert.deepEqual(global.wx.navigations.at(-1), { url: '/pages/counselor/reports/index' });
+  assert.deepEqual(global.wx.navigations.at(-1), { url: '/pages/counselor/reports/index?scope=pending' });
 });
 
 test('10. 状态展示统一中文文案，WXML 不包含内部状态枚举', () => {
@@ -158,7 +160,7 @@ test('11. 辅导员工单页复用既有云函数并只展示安全的列表字�
   }]);
   assert.equal(JSON.stringify(instance.data.reports).includes('敏感正文'), false);
   assert.equal(global.wx.calls[0].name, 'getCounselorReports');
-  assert.deepEqual(global.wx.calls[0].data, {});
+  assert.deepEqual(global.wx.calls[0].data, { scope: 'pending' });
 });
 
 test('12. 自适应工作台 CSS 使用可换行双列和全宽约束，不设置横向固定页面宽度', () => {

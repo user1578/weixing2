@@ -12,7 +12,8 @@ test('1. Web 后台包含工作台、身份管理和学院管理导航', () => {
   for (const label of ['工作台', '预警管理', '工单管理', '身份管理', '学院管理']) {
     assert.match(appSource, new RegExp(`>${label}<`));
   }
-  assert.match(appSource, /功能完善中/);
+  assert.doesNotMatch(appSource, /功能完善中/);
+  for (const label of ['待核验', '处理中', '已结案', '查看详情', '退回辅导员', '确认并开始处置']) assert.match(appSource, new RegExp(label));
   assert.match(appSource, /保卫处工作台/);
   assert.match(appSource, /校园反诈业务概览/);
   assert.match(styleSource, /\.sidebar\s*\{/);
@@ -57,9 +58,10 @@ test('6. 工作台通过 dashboard 接口显示真实指标与安全列表字段
   for (const label of ['待保卫处核验', '处理中', '已结案', '今日新增', '待办工单', '最新预警', '人员与学院概览', '快捷操作']) {
     assert.match(appSource, new RegExp(label));
   }
-  for (const forbidden of ['studentId', 'sourceReference', 'incidentNarrative', 'contactPhone', 'actionContent']) {
+  for (const forbidden of ['studentId', 'sourceReference', 'wxOpenId', 'wxIdentityKey', 'passwordHash']) {
     assert.doesNotMatch(appSource, new RegExp(`(?:report|alert)\\.${forbidden}`), forbidden);
   }
+  assert.match(appSource, /@click="openReport\(report\.reportId\)"/);
   assert.doesNotMatch(appSource, /pendingSecurityVerifyCount:\s*\d+/);
 });
 
@@ -76,4 +78,16 @@ test('8. 新增学院后进入身份管理并重新加载 active 学院下拉选
   assert.match(appSource, /activeView\.value = "identities"/);
   assert.match(appSource, /await loadIdentities\(\)/);
   assert.match(appSource, /colleges\.value = payload\.colleges\.map/);
+});
+
+test('9. 工单管理加载真实三队列、敏感详情与受限状态操作', () => {
+  assert.match(appSource, /fetch\(`\$\{apiBaseUrl\}\/security\/reports`/);
+  assert.match(appSource, /security\/reports\/\$\{encodeURIComponent\(reportId\)\}/);
+  assert.match(appSource, /REPORTS_LOADED/);
+  assert.match(appSource, /REPORT_DETAIL_LOADED/);
+  assert.match(appSource, /REPORT_RETURNED_TO_COUNSELOR/);
+  assert.match(appSource, /\/reports\/\$\{encodeURIComponent\(report\.reportId\)\}\/start-process/);
+  assert.match(appSource, /\/reports\/\$\{encodeURIComponent\(report\.reportId\)\}\/close/);
+  assert.match(appSource, /await loadReports\(\);/);
+  assert.match(appSource, /await loadReportDetail\(report\.reportId\);/);
 });

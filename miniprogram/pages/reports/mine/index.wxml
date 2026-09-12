@@ -1,0 +1,13 @@
+<view class="page">
+  <view class="page_header"><view class="page_title">我的工单</view><view class="page_subtitle">仅展示本人提交的工单及公开处理进度</view></view>
+  <view class="state_card" wx:if="{{loading}}">正在加载工单…</view>
+  <view class="state_card error_state" wx:elif="{{errorMessage}}"><view>{{errorMessage}}</view><button class="retry_button" bindtap="loadReports">重新加载</button></view>
+  <view class="state_card" wx:elif="{{loaded && reports.length === 0}}">暂时没有已提交的工单</view>
+  <view class="report_list" wx:elif="{{reports.length}}">
+    <button class="report_card" wx:for="{{reports}}" wx:key="reportId" data-report-id="{{item.reportId}}" bindtap="openDetail">
+      <view class="report_top"><view class="fraud_type">{{item.fraudTypeText}}</view><view class="risk_tag">{{item.riskText}}</view></view>
+      <view class="report_meta"><text>{{item.statusText}}</text><text>{{item.hasLossText}}</text></view>
+      <view class="report_time">提交时间：{{item.submittedAtText}}</view>
+    </button>
+  </view>
+</view>

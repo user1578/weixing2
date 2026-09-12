@@ -31,13 +31,16 @@ function textFor(labels, value, fallback) {
 }
 
 function toReportView(report = {}) {
-  return {
+  const submittedAt = new Date(report.submittedAt);
+  const view = {
     reportId: typeof report.reportId === "string" ? report.reportId : "",
     fraudTypeText: textFor(FRAUD_TYPE_LABELS, report.fraudType, "未知诈骗类型"),
     riskText: textFor(RISK_LEVEL_LABELS, report.riskLevel, "风险待评估"),
     riskClass: RISK_LEVEL_LABELS[report.riskLevel] ? `risk-${report.riskLevel}` : "risk-unknown",
     statusText: textFor(COUNSELOR_STATUS_LABELS, report.status, "状态待更新"),
   };
+  if (!Number.isNaN(submittedAt.getTime())) view.submittedAtText = submittedAt.toLocaleString();
+  return view;
 }
 
 function messageFor(code) {
@@ -46,10 +49,16 @@ function messageFor(code) {
 
 const pageDefinition = {
   data: {
+    scope: "pending",
+    scopeTitle: "待核验工单",
     reports: [],
     loading: false,
     loaded: false,
     errorMessage: "",
+  },
+
+  onLoad(query) {
+    this.setScope(query && query.scope);
   },
 
   onShow() {
@@ -67,7 +76,7 @@ const pageDefinition = {
     }
     this.setData({ loading: true, loaded: false, errorMessage: "" });
     try {
-      const response = await wx.cloud.callFunction({ name: "getCounselorReports", data: {} });
+      const response = await wx.cloud.callFunction({ name: "getCounselorReports", data: { scope: this.data.scope } });
       const result = response.result || {};
       const code = result.code || "INTERNAL_ERROR";
       if (!result.ok) {
@@ -84,6 +93,21 @@ const pageDefinition = {
       this.setData({ loading: false });
       if (fromPullDown) wx.stopPullDownRefresh();
     }
+  },
+
+  setScope(scope) {
+    const nextScope = scope === "following" || scope === "history" ? scope : "pending";
+    this.setData({ scope: nextScope, scopeTitle: nextScope === "following" ? "跟进处理中" : nextScope === "history" ? "工单记录" : "待核验工单", reports: [], loaded: false, errorMessage: "" });
+  },
+
+  selectScope(event) {
+    this.setScope(event.currentTarget.dataset.scope);
+    this.loadReports();
+  },
+
+  openDetail(event) {
+    const reportId = event.currentTarget.dataset.reportId;
+    if (typeof reportId === "string" && reportId) wx.navigateTo({ url: `/pages/counselor/reports/detail/index?reportId=${encodeURIComponent(reportId)}` });
   },
 };
 

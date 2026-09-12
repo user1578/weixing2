@@ -5,7 +5,10 @@
     "pages/alerts/index/index",
     "pages/alerts/detail/index",
     "pages/reports/create/index",
-    "pages/counselor/reports/index"
+    "pages/reports/mine/index",
+    "pages/reports/detail/index",
+    "pages/counselor/reports/index",
+    "pages/counselor/reports/detail/index"
   ],
   "window": {
     "backgroundColor": "#F6F6F6",

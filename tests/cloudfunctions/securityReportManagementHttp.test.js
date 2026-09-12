@@ -1,0 +1,75 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const securityAuth = require('../../cloudfunctions/securityAuthHttp');
+
+const { createSecurityReportManagementService } = securityAuth.__testables;
+const security = { _id: 'security_1', role: 'security', status: 'active', wxOpenId: null, bindStatus: 'not_applicable', name: '保卫处' };
+const counselor = { _id: 'counselor_1', role: 'counselor', status: 'active', collegeId: 'college_a' };
+const student = { _id: 'student_1', role: 'student', name: '学生甲', studentNo: '20260001', wxOpenId: 'secret-openid', wxIdentityKey: 'openid:secret-openid', passwordHash: 'never-return' };
+const baseReport = { _id: 'report_1', studentId: 'student_1', collegeId: 'college_a', fraudType: 'fake_loan', riskLevel: 'high', status: 'pending_security_verify', submittedAt: '2026-09-12T10:00:00.000Z', version: 2, hasLoss: true, currentHandlerId: 'counselor_1', incidentNarrative: '敏感经过', suspiciousAccount: '敏感账号', contactPhone: '13800138000', studentRemark: '学生补充', riskReasons: ['has_loss'] };
+
+function createDb({ users = [security, counselor, student], reports = [baseReport] } = {}) {
+  const state = { users: structuredClone(users), reports: structuredClone(reports), colleges: [{ _id: 'college_a', name: '计算机学院' }], followups: [], dispositions: [], audits: [], transactionCalls: 0 };
+  const rows = (name) => ({ users: state.users, fraud_reports: state.reports, colleges: state.colleges, counselor_followups: state.followups, security_dispositions: state.dispositions, audit_logs: state.audits })[name];
+  const matching = (list, query) => list.filter((row) => Object.entries(query).every(([key, value]) => row[key] === value));
+  const snapshot = () => structuredClone({ users: state.users, reports: state.reports, colleges: state.colleges, followups: state.followups, dispositions: state.dispositions, audits: state.audits });
+  const restore = (saved) => Object.keys(saved).forEach((key) => state[key].splice(0, state[key].length, ...saved[key]));
+  function collection(name) { return {
+    doc(id) { return { get: async () => { const found = rows(name).find((row) => row._id === id); return { data: found ? [structuredClone(found)] : [] }; } }; },
+    where(query) { const get = async () => ({ data: structuredClone(matching(rows(name), query)) }); return {
+      get, limit() { return { get }; }, orderBy() { return { limit() { return { get }; } }; },
+      async update(data) { const found = matching(rows(name), query); found.forEach((row) => Object.assign(row, structuredClone(data))); return { updated: found.length, stats: { updated: found.length } }; },
+    }; },
+    limit() { return { get: async () => ({ data: structuredClone(rows(name)) }) }; },
+    async add(document) { rows(name).push(structuredClone(document)); return { id: document._id }; },
+  }; }
+  return { state, db: { collection, async runTransaction(callback) { state.transactionCalls += 1; const saved = snapshot(); try { return await callback({ collection }); } catch (error) { restore(saved); throw error; } } } };
+}
+
+function service(options = {}) {
+  const mock = createDb(options);
+  let sequence = 0;
+  return { ...mock, service: createSecurityReportManagementService({ authService: { async authenticateSecuritySession() { return { ok: true, user: structuredClone(security) }; } }, db: mock.db, serverDate: () => ({ $serverDate: ++sequence }), createRequestId: () => `req_${++sequence}`, createAuditId: () => `audit_${++sequence}`, createFollowupId: () => `followup_${++sequence}`, createDispositionId: () => `disposition_${++sequence}`, logger: { error() {} }, configured: true }) };
+}
+
+test('保卫处三队列只返回最小列表字段，不泄露学生或正文', async () => {
+  const { service: target } = service({ reports: [baseReport, { ...baseReport, _id: 'processing', status: 'in_process' }, { ...baseReport, _id: 'closed', status: 'closed' }] });
+  const result = await target.list('Bearer token');
+  assert.equal(result.code, 'REPORTS_LOADED');
+  assert.deepEqual(Object.keys(result.queues).sort(), ['closed', 'inProcess', 'pendingSecurityVerify']);
+  assert.equal(result.queues.pendingSecurityVerify[0].collegeName, '计算机学院');
+  for (const forbidden of ['studentId', 'incidentNarrative', 'suspiciousAccount', 'contactPhone', 'currentHandlerId']) assert.equal(JSON.stringify(result).includes(forbidden), false, forbidden);
+});
+
+test('保卫处详情记录敏感查看审计，响应不包含 OPENID 或密码', async () => {
+  const fixture = service();
+  const result = await fixture.service.detail('Bearer token', 'report_1');
+  assert.equal(result.code, 'REPORT_DETAIL_LOADED');
+  assert.equal(result.report.incidentNarrative, '敏感经过');
+  assert.deepEqual(result.student, { name: '学生甲', studentNo: '20260001' });
+  assert.equal(fixture.state.audits[0].action, 'report.view_sensitive');
+  for (const forbidden of ['wxOpenId', 'wxIdentityKey', 'passwordHash', 'secret-openid']) assert.equal(JSON.stringify(result).includes(forbidden), false, forbidden);
+});
+
+test('退回辅导员在同一事务更新工单、新建 pending 跟进、处置及审计', async () => {
+  const fixture = service();
+  const result = await fixture.service.returnToCounselor('Bearer token', 'report_1', JSON.stringify({ version: 2, verificationResult: 'suspected', returnReason: '请补充联系核验结果', actionContent: '退回补充材料' }));
+  assert.equal(result.code, 'REPORT_RETURNED_TO_COUNSELOR');
+  assert.equal(fixture.state.transactionCalls, 1);
+  assert.deepEqual({ status: fixture.state.reports[0].status, version: fixture.state.reports[0].version, currentHandlerId: fixture.state.reports[0].currentHandlerId }, { status: 'pending_counselor_verify', version: 3, currentHandlerId: 'counselor_1' });
+  assert.equal(fixture.state.followups[0].status, 'pending');
+  assert.equal(fixture.state.followups[0].opinion, '保卫处退回补充');
+  assert.equal(fixture.state.dispositions[0].action, 'return');
+  assert.equal(fixture.state.audits[0].action, 'report.return');
+});
+
+test('原辅导员不可用时退回拒绝且事务回滚', async () => {
+  const fixture = service({ users: [security, { ...counselor, status: 'suspended' }, student] });
+  const result = await fixture.service.returnToCounselor('Bearer token', 'report_1', { version: 2, verificationResult: 'suspected', returnReason: '补充', actionContent: '说明' });
+  assert.equal(result.code, 'CONFLICT');
+  assert.equal(fixture.state.reports[0].status, 'pending_security_verify');
+  assert.equal(fixture.state.followups.length, 0);
+  assert.equal(fixture.state.dispositions.length, 0);
+});

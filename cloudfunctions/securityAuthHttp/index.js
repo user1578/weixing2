@@ -21,6 +21,7 @@ const REPORT_CLOSE_INPUT_KEYS = new Set([
   'closeReason',
   'actionContent',
 ]);
+const REPORT_RETURN_INPUT_KEYS = new Set(['version', 'verificationResult', 'returnReason', 'actionContent']);
 const IDENTITY_CREATE_INPUT_KEYS = new Set(['role', 'identityNo', 'name', 'collegeId']);
 const IDENTITY_UNBIND_INPUT_KEYS = new Set(['version']);
 const IDENTITY_STATUS_INPUT_KEYS = new Set(['version', 'status']);
@@ -57,6 +58,11 @@ const MAX_ALERT_CONTENT_LENGTH = 1000;
 const MAX_SOURCE_REFERENCE_LENGTH = 128;
 const MAX_ACTION_CONTENT_LENGTH = 1000;
 const MAX_CLOSE_REASON_LENGTH = 1000;
+const MAX_RETURN_REASON_LENGTH = 1000;
+const MAX_RETURN_ACTION_CONTENT_LENGTH = 2000;
+const SECURITY_REPORT_QUEUE_LIMIT = 50;
+const SECURITY_REPORT_DETAIL_FOLLOWUP_LIMIT = 100;
+const SECURITY_REPORT_DETAIL_DISPOSITION_LIMIT = 100;
 const MAX_IDENTITY_NO_LENGTH = 64;
 const MAX_IDENTITY_NAME_LENGTH = 64;
 const MAX_COLLEGE_ID_LENGTH = 64;
@@ -224,6 +230,18 @@ function parseReportCloseBody(body) {
     closeReason,
     actionContent,
   } : null;
+}
+
+function parseReportReturnBody(body) {
+  const parsed = parseJsonObjectBody(body);
+  if (!parsed || !hasOnlyAllowedKeys(parsed, REPORT_RETURN_INPUT_KEYS, REPORT_RETURN_INPUT_KEYS) ||
+    !Number.isSafeInteger(parsed.version) || parsed.version <= 0 ||
+    typeof parsed.verificationResult !== 'string' || !ALLOWED_REPORT_CLOSE_VERIFICATION_RESULTS.has(parsed.verificationResult)) {
+    return null;
+  }
+  const returnReason = normalizeRequiredString(parsed.returnReason, MAX_RETURN_REASON_LENGTH);
+  const actionContent = normalizeRequiredString(parsed.actionContent, MAX_RETURN_ACTION_CONTENT_LENGTH);
+  return returnReason && actionContent ? { version: parsed.version, verificationResult: parsed.verificationResult, returnReason, actionContent } : null;
 }
 
 function parseIdentityCreateBody(body) {
@@ -1360,6 +1378,185 @@ function createSecurityReportClosingService({
   return { close };
 }
 
+function createReportSensitiveViewAudit({ reportId, actorId, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(), actorId, actorRole: 'security', actorCollegeId: null,
+    action: 'report.view_sensitive', resourceType: 'fraud_report', resourceId: reportId,
+    result: 'success', requestId, createdAt: serverDate(),
+  };
+}
+
+function createReportReturnAudit({ reportId, actorId, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(), actorId, actorRole: 'security', actorCollegeId: null,
+    action: 'report.return', resourceType: 'fraud_report', resourceId: reportId,
+    result: 'success', beforeSummary: { status: 'pending_security_verify' },
+    afterSummary: { status: 'pending_counselor_verify', followupStatus: 'pending' }, requestId, createdAt: serverDate(),
+  };
+}
+
+function reportListItem(report, collegeNames) {
+  return {
+    reportId: report._id, fraudType: report.fraudType, riskLevel: report.riskLevel, status: report.status,
+    collegeName: collegeNames.get(report.collegeId) || '', submittedAt: report.submittedAt,
+    version: report.version, hasLoss: Boolean(report.hasLoss),
+  };
+}
+
+function reportDetailProjection(report, collegeName) {
+  return {
+    reportId: report._id, fraudType: report.fraudType, incidentAt: report.incidentAt ?? null,
+    involvedAmount: report.involvedAmount ?? null, hasLoss: report.hasLoss ?? null,
+    incidentNarrative: report.incidentNarrative ?? null, suspiciousPlatform: report.suspiciousPlatform ?? null,
+    suspiciousAccount: report.suspiciousAccount ?? null, stillContacting: report.stillContacting ?? null,
+    contactPhone: report.contactPhone ?? null, studentRemark: report.studentRemark ?? null,
+    riskLevel: report.riskLevel ?? null, riskReasons: Array.isArray(report.riskReasons) ? report.riskReasons : [],
+    status: report.status ?? null, submittedAt: report.submittedAt ?? null, version: report.version ?? null,
+    finalOutcome: report.finalOutcome ?? null, confirmedLossAmount: report.confirmedLossAmount ?? null,
+    closeReason: report.closeReason ?? null, closedAt: report.closedAt ?? null, collegeName,
+  };
+}
+
+function followupDetailProjection(followup) {
+  return {
+    followupId: followup._id, status: followup.status ?? null, contactedAt: followup.contactedAt ?? null,
+    contactMethod: followup.contactMethod ?? null, verificationResult: followup.verificationResult ?? null,
+    transferReason: followup.transferReason ?? null, createdAt: followup.createdAt ?? null, completedAt: followup.completedAt ?? null,
+  };
+}
+
+function dispositionDetailProjection(disposition) {
+  return {
+    action: disposition.action ?? null, statusAfter: disposition.statusAfter ?? null,
+    verificationResult: disposition.verificationResult ?? null, returnReason: disposition.returnReason ?? null,
+    confirmedLossAmount: disposition.confirmedLossAmount ?? null, finalOutcome: disposition.finalOutcome ?? null,
+    createdAt: disposition.createdAt ?? null,
+  };
+}
+
+function createSecurityReportManagementService({
+  authService, db, serverDate, createFollowupId = () => `followup_${crypto.randomUUID().replace(/-/g, '')}`,
+  createDispositionId = () => `disposition_${crypto.randomUUID().replace(/-/g, '')}`,
+  createAuditId = () => `audit_${crypto.randomUUID().replace(/-/g, '')}`,
+  createRequestId = () => crypto.randomUUID(), logger = console, configured = true,
+} = {}) {
+  const dependenciesReady = configured && authService && typeof authService.authenticateSecuritySession === 'function' &&
+    db && typeof db.collection === 'function' && typeof db.runTransaction === 'function' && typeof serverDate === 'function';
+  const internalFailure = (requestId, stage, resourceId = null) => {
+    safeLog(logger, { requestId, code: 'INTERNAL_ERROR', resourceId, stage });
+    return failure('INTERNAL_ERROR');
+  };
+  async function authenticate(authorization, requestId, stage) {
+    try { return await authService.authenticateSecuritySession(authorization); }
+    catch (error) { return { ok: false, result: internalFailure(requestId, stage) }; }
+  }
+  async function loadCollegeNames() {
+    const result = await db.collection('colleges').limit(DASHBOARD_COLLEGE_READ_LIMIT).get();
+    ensureDatabaseResult(result);
+    return new Map((Array.isArray(result.data) ? result.data : []).filter((college) => college && typeof college._id === 'string' && typeof college.name === 'string')
+      .map((college) => [college._id, college.name.trim()]));
+  }
+
+  async function list(authorization) {
+    const requestId = createRequestId();
+    if (!dependenciesReady) return internalFailure(requestId, 'securityReportListConfiguration');
+    const authenticated = await authenticate(authorization, requestId, 'securityReportListAuthentication');
+    if (!authenticated.ok) return authenticated.result;
+    try {
+      const statuses = ['pending_security_verify', 'in_process', 'closed'];
+      const [collegeNames, ...resultSets] = await Promise.all([
+        loadCollegeNames(),
+        ...statuses.map((status) => db.collection('fraud_reports').where({ status }).orderBy('submittedAt', 'desc').limit(SECURITY_REPORT_QUEUE_LIMIT).get()),
+      ]);
+      const queues = Object.fromEntries(statuses.map((status, index) => [
+        status === 'pending_security_verify' ? 'pendingSecurityVerify' : status === 'in_process' ? 'inProcess' : 'closed',
+        (Array.isArray(resultSets[index].data) ? resultSets[index].data : [])
+          .filter((report) => report && report.status === status).slice(0, SECURITY_REPORT_QUEUE_LIMIT)
+          .map((report) => reportListItem(report, collegeNames)),
+      ]));
+      return success('REPORTS_LOADED', { queues });
+    } catch (error) { return internalFailure(requestId, 'securityReportListRead'); }
+  }
+
+  async function detail(authorization, reportId) {
+    const requestId = createRequestId();
+    if (!reportId || reportId.length > 128) return failure('INVALID_INPUT');
+    if (!dependenciesReady) return internalFailure(requestId, 'securityReportDetailConfiguration', reportId || null);
+    const authenticated = await authenticate(authorization, requestId, 'securityReportDetailAuthentication');
+    if (!authenticated.ok) return authenticated.result;
+    try {
+      const report = await findRecordById(db, 'fraud_reports', reportId);
+      if (!report) return failure('NOT_FOUND');
+      const [student, college, followupsResult, dispositionsResult] = await Promise.all([
+        findRecordById(db, 'users', report.studentId),
+        findRecordById(db, 'colleges', report.collegeId),
+        db.collection('counselor_followups').where({ businessType: 'report', businessId: report._id }).orderBy('createdAt', 'asc').limit(SECURITY_REPORT_DETAIL_FOLLOWUP_LIMIT).get(),
+        db.collection('security_dispositions').where({ reportId: report._id }).orderBy('createdAt', 'asc').limit(SECURITY_REPORT_DETAIL_DISPOSITION_LIMIT).get(),
+      ]);
+      if (!student) return failure('NOT_FOUND');
+      ensureDatabaseResult(followupsResult); ensureDatabaseResult(dispositionsResult);
+      ensureSuccessfulInsert(await db.collection('audit_logs').add(createReportSensitiveViewAudit({
+        reportId: report._id, actorId: authenticated.user._id, requestId, serverDate, createAuditId,
+      })));
+      return success('REPORT_DETAIL_LOADED', {
+        report: reportDetailProjection(report, college && typeof college.name === 'string' ? college.name : ''),
+        student: { name: student.name ?? null, studentNo: student.studentNo ?? null },
+        followups: (Array.isArray(followupsResult.data) ? followupsResult.data : []).filter(Boolean).map(followupDetailProjection),
+        dispositions: (Array.isArray(dispositionsResult.data) ? dispositionsResult.data : []).filter(Boolean).map(dispositionDetailProjection),
+      });
+    } catch (error) { return internalFailure(requestId, 'securityReportDetailRead', reportId); }
+  }
+
+  async function returnToCounselor(authorization, reportId, body) {
+    const requestId = createRequestId();
+    const input = parseReportReturnBody(body);
+    if (!input || !reportId || reportId.length > 128) return failure('INVALID_INPUT');
+    if (!dependenciesReady) return internalFailure(requestId, 'securityReportReturnConfiguration', reportId);
+    const authenticated = await authenticate(authorization, requestId, 'securityReportReturnAuthentication');
+    if (!authenticated.ok) return authenticated.result;
+    const followupId = createFollowupId();
+    const dispositionId = createDispositionId();
+    const auditId = createAuditId();
+    try {
+      const result = await db.runTransaction(async (transaction) => {
+        const actor = await findRecordById(transaction, 'users', authenticated.user._id);
+        if (!hasActiveSecuritySessionAccess(actor)) throw businessError('CONFLICT');
+        const report = await findRecordById(transaction, 'fraud_reports', reportId);
+        if (!report) throw businessError('NOT_FOUND');
+        if (report.status !== 'pending_security_verify' || report.version !== input.version || typeof report.currentHandlerId !== 'string' || !report.currentHandlerId) throw businessError('CONFLICT');
+        const counselor = await findRecordById(transaction, 'users', report.currentHandlerId);
+        if (!counselor || counselor.role !== 'counselor' || counselor.status !== 'active' || counselor.collegeId !== report.collegeId) throw businessError('CONFLICT');
+        const reportUpdate = ensureDatabaseResult(await transaction.collection('fraud_reports').where({
+          _id: report._id, status: 'pending_security_verify', version: input.version, currentHandlerId: counselor._id,
+        }).update({
+          status: 'pending_counselor_verify', currentHandlerId: counselor._id, version: input.version + 1, updatedAt: serverDate(),
+        }));
+        if (updatedCount(reportUpdate) !== 1) throw businessError('CONFLICT');
+        ensureSuccessfulInsert(await transaction.collection('counselor_followups').add({
+          _id: followupId, businessType: 'report', businessId: report._id, studentId: report.studentId, collegeId: report.collegeId,
+          counselorId: counselor._id, status: 'pending', opinion: '保卫处退回补充', contactedAt: null, contactMethod: null,
+          focusFlag: false, transferToSecurity: false, version: 1, createdAt: serverDate(), updatedAt: serverDate(),
+        }));
+        ensureSuccessfulInsert(await transaction.collection('security_dispositions').add({
+          _id: dispositionId, reportId: report._id, operatorId: actor._id, action: 'return',
+          statusAfter: 'pending_counselor_verify', verificationResult: input.verificationResult,
+          actionContent: input.actionContent, returnReason: input.returnReason, createdAt: serverDate(),
+        }));
+        ensureSuccessfulInsert(await transaction.collection('audit_logs').add(createReportReturnAudit({
+          reportId: report._id, actorId: actor._id, requestId, serverDate, createAuditId: () => auditId,
+        })));
+        return { reportId: report._id, status: 'pending_counselor_verify', version: input.version + 1 };
+      });
+      return success('REPORT_RETURNED_TO_COUNSELOR', { report: result });
+    } catch (error) {
+      if (error && error.isBusinessError) return failure(error.businessCode);
+      if (isTransactionConflict(error)) return failure('CONFLICT');
+      return internalFailure(requestId, 'securityReportReturnTransaction', reportId);
+    }
+  }
+  return { list, detail, returnToCounselor };
+}
+
 function createSecurityIdentityManagementService({
   authService,
   db,
@@ -2017,6 +2214,16 @@ function getReportCloseId(path) {
   return match ? match[1] : null;
 }
 
+function getSecurityReportId(path) {
+  const match = /^\/security\/reports\/([^/]+)$/.exec(path);
+  return match ? match[1] : null;
+}
+
+function getSecurityReportReturnId(path) {
+  const match = /^\/security\/reports\/([^/]+)\/return$/.exec(path);
+  return match ? match[1] : null;
+}
+
 function getIdentityUnbindUserId(path) {
   const match = /^\/identities\/([^/]+)\/unbind$/.exec(path);
   return match ? match[1] : null;
@@ -2037,6 +2244,7 @@ function createHttpHandler({
   alertService = null,
   reportProcessingService = null,
   reportClosingService = null,
+  reportManagementService = null,
   identityManagementService = null,
   collegeManagementService = null,
   dashboardService = null,
@@ -2055,6 +2263,8 @@ function createHttpHandler({
       const identityUnbindUserId = getIdentityUnbindUserId(path);
       const identityStatusUserId = getIdentityStatusUserId(path);
       const collegeStatusId = getCollegeStatusId(path);
+      const securityReportId = getSecurityReportId(path);
+      const securityReportReturnId = getSecurityReportReturnId(path);
       const allowedMethods = path === '/login'
         ? 'POST, OPTIONS'
         : path === '/session'
@@ -2065,7 +2275,9 @@ function createHttpHandler({
               ? 'GET, POST, OPTIONS'
               : (path === '/dashboard')
                 ? 'GET, OPTIONS'
-            : (identityUnbindUserId || identityStatusUserId || collegeStatusId || path === '/alerts' || getAlertDispatchId(path) || getReportStartProcessId(path) || getReportCloseId(path))
+                : (path === '/security/reports' || securityReportId)
+                  ? 'GET, OPTIONS'
+            : (identityUnbindUserId || identityStatusUserId || collegeStatusId || securityReportReturnId || path === '/alerts' || getAlertDispatchId(path) || getReportStartProcessId(path) || getReportCloseId(path))
             ? 'POST, OPTIONS'
             : null;
       if (!allowedMethods) {
@@ -2091,6 +2303,23 @@ function createHttpHandler({
         }
         return httpResponse(await dashboardService.load(
           readHeader(event && event.headers, 'authorization'),
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      if (method === 'GET' && path === '/security/reports') {
+        if (!reportManagementService || typeof reportManagementService.list !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await reportManagementService.list(
+          readHeader(event && event.headers, 'authorization'),
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      const securityReportId = getSecurityReportId(path);
+      if (method === 'GET' && securityReportId) {
+        if (!reportManagementService || typeof reportManagementService.detail !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await reportManagementService.detail(
+          readHeader(event && event.headers, 'authorization'), securityReportId,
         ), buildResponseHeaders(origin, originWhitelist));
       }
       if (method === 'GET' && path === '/colleges') {
@@ -2202,6 +2431,15 @@ function createHttpHandler({
           event && event.body,
         ), buildResponseHeaders(origin, originWhitelist));
       }
+      const securityReportReturnId = getSecurityReportReturnId(path);
+      if (method === 'POST' && securityReportReturnId) {
+        if (!reportManagementService || typeof reportManagementService.returnToCounselor !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await reportManagementService.returnToCounselor(
+          readHeader(event && event.headers, 'authorization'), securityReportReturnId, event && event.body,
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
       return httpResponse(failure('NOT_FOUND'), buildResponseHeaders(origin, originWhitelist));
     } catch (error) {
       safeLog(logger, { requestId: crypto.randomUUID(), code: 'INTERNAL_ERROR', resourceId: null, stage: 'securityHttpRequest' });
@@ -2285,6 +2523,13 @@ function createDefaultHandler(options = {}) {
       logger,
       configured: dependencies.configured,
     });
+    const reportManagementService = createSecurityReportManagementService({
+      authService,
+      db: dependencies.db,
+      serverDate: dependencies.serverDate,
+      logger,
+      configured: dependencies.configured,
+    });
     const identityManagementService = createSecurityIdentityManagementService({
       authService,
       db: dependencies.db,
@@ -2310,6 +2555,7 @@ function createDefaultHandler(options = {}) {
       alertService,
       reportProcessingService,
       reportClosingService,
+      reportManagementService,
       identityManagementService,
       collegeManagementService,
       dashboardService,
@@ -2390,6 +2636,7 @@ exports.__testables = {
   createSecurityDashboardService,
   createSecurityIdentityManagementService,
   createSecurityReportClosingService,
+  createSecurityReportManagementService,
   createSecurityReportProcessingService,
   calculateManualAlertRisk,
   createLoginAudit,
@@ -2400,6 +2647,8 @@ exports.__testables = {
   getIdentityStatusUserId,
   getIdentityUnbindUserId,
   getReportCloseId,
+  getSecurityReportId,
+  getSecurityReportReturnId,
   getReportStartProcessId,
   createNodeServer,
   mintSessionToken,
@@ -2412,6 +2661,7 @@ exports.__testables = {
   parseIdentityStatusBody,
   parseIdentityUnbindBody,
   parseReportCloseBody,
+  parseReportReturnBody,
   parseReportStartProcessBody,
   parseAllowedOrigins,
   parseLoginBody,

@@ -5,7 +5,8 @@ const crypto = require('crypto');
 const EXPECTED_APP_ID = 'wxe262970211858262';
 const TARGET_ENV_ID = 'aa-d4gvb4o3t50fc94f8';
 const MAX_REPORTS = 100;
-const ACCEPTED_EVENT_KEYS = new Set(['userInfo', 'tcbContext']);
+const ACCEPTED_EVENT_KEYS = new Set(['scope', 'userInfo', 'tcbContext']);
+const REPORT_SCOPES = new Set(['pending', 'following', 'history']);
 const RISK_PRIORITY = { high: 0, medium: 1, low: 2 };
 
 function success(code, payload = {}) {
@@ -21,9 +22,10 @@ function getAppId(wxContext) {
 }
 
 function validateInput(event) {
-  if (event === undefined || event === null) return true;
-  return typeof event === 'object' && !Array.isArray(event) &&
-    Object.keys(event).every((key) => ACCEPTED_EVENT_KEYS.has(key));
+  if (event === undefined || event === null) return 'pending';
+  if (typeof event !== 'object' || Array.isArray(event) || Object.keys(event).some((key) => !ACCEPTED_EVENT_KEYS.has(key))) return null;
+  if (!Object.hasOwn(event, 'scope')) return 'pending';
+  return typeof event.scope === 'string' && REPORT_SCOPES.has(event.scope) ? event.scope : null;
 }
 
 function hasCollegeId(user) {
@@ -53,16 +55,22 @@ function createAccessDeniedAuditLog({ user, code, requestId, serverDate, createA
   };
 }
 
-function toListItem(report) {
-  return {
+function toListItem(report, workflow = null) {
+  const item = {
     reportId: report._id,
     fraudType: report.fraudType,
     riskLevel: report.riskLevel,
-    riskReasons: Array.isArray(report.riskReasons) ? report.riskReasons : [],
     status: report.status,
     submittedAt: report.submittedAt,
     hasSourceAlert: Boolean(report.sourceAlertId),
   };
+  if (workflow) {
+    item.followupId = workflow._id;
+    item.followupStatus = workflow.status;
+    item.followupVersion = workflow.version;
+    item.reportVersion = report.version;
+  }
+  return item;
 }
 
 function compareReports(left, right) {
@@ -110,7 +118,8 @@ function createHandler({
     };
 
     try {
-      if (!validateInput(event)) return failure('INVALID_INPUT', '请求参数无效');
+      const scope = validateInput(event);
+      if (!scope) return failure('INVALID_INPUT', '请求参数无效');
 
       const wxContext = getWXContext() || {};
       const appId = getAppId(wxContext);
@@ -129,13 +138,37 @@ function createHandler({
         return auditedIdentityFailure(counselor, 'INTERNAL_ERROR', '账号绑定状态异常，请联系管理员', 'counselorReportsBindingConsistency');
       }
 
-      const result = await db.collection('fraud_reports').where({
-        collegeId: counselor.collegeId,
-        status: 'pending_counselor_verify',
-      }).orderBy('submittedAt', 'desc').limit(MAX_REPORTS).get();
-      const reports = (Array.isArray(result.data) ? result.data : [])
-        .sort(compareReports)
-        .map(toListItem);
+      let reports = [];
+      if (scope === 'pending') {
+        const result = await db.collection('fraud_reports').where({
+          collegeId: counselor.collegeId,
+          status: 'pending_counselor_verify',
+        }).orderBy('submittedAt', 'desc').limit(MAX_REPORTS).get();
+        reports = (Array.isArray(result.data) ? result.data : []).sort(compareReports).map(toListItem);
+      } else if (scope === 'following') {
+        const [reportsResult, followupsResult] = await Promise.all([
+          db.collection('fraud_reports').where({ collegeId: counselor.collegeId, currentHandlerId: counselor._id, status: 'pending_counselor_verify' })
+            .orderBy('submittedAt', 'desc').limit(MAX_REPORTS).get(),
+          db.collection('counselor_followups').where({ businessType: 'report', counselorId: counselor._id, collegeId: counselor.collegeId }).limit(MAX_REPORTS).get(),
+        ]);
+        const activeFollowups = new Map((Array.isArray(followupsResult.data) ? followupsResult.data : [])
+          .filter((followup) => followup && (followup.status === 'pending' || followup.status === 'in_progress'))
+          .map((followup) => [followup.businessId, followup]));
+        reports = (Array.isArray(reportsResult.data) ? reportsResult.data : [])
+          .filter((report) => activeFollowups.has(report._id)).sort(compareReports)
+          .map((report) => toListItem(report, activeFollowups.get(report._id)));
+      } else {
+        const statuses = ['pending_security_verify', 'in_process', 'closed'];
+        const resultSets = await Promise.all(statuses.map((status) => db.collection('fraud_reports').where({
+          collegeId: counselor.collegeId, status,
+        }).orderBy('submittedAt', 'desc').limit(MAX_REPORTS).get()));
+        reports = resultSets.flatMap((result) => Array.isArray(result.data) ? result.data : [])
+          .sort((left, right) => {
+            const leftTime = new Date(left.submittedAt).getTime() || 0;
+            const rightTime = new Date(right.submittedAt).getTime() || 0;
+            return rightTime - leftTime || String(left._id).localeCompare(String(right._id));
+          }).slice(0, MAX_REPORTS).map(toListItem);
+      }
       return success('COUNSELOR_REPORTS_LOADED', { reports });
     } catch (error) {
       logger.error({ requestId, code: 'INTERNAL_ERROR', resourceId: null, stage: 'getCounselorReports' });
@@ -161,6 +194,7 @@ exports.__testables = {
   EXPECTED_APP_ID,
   MAX_REPORTS,
   RISK_PRIORITY,
+  REPORT_SCOPES,
   TARGET_ENV_ID,
   compareReports,
   createAccessDeniedAuditLog,

@@ -5,6 +5,8 @@
   background: #f5f8fc;
 }
 
+.scope_tabs { display:flex; gap:12rpx; margin:0 0 20rpx; }.scope_tab { flex:1; padding:16rpx 4rpx; font-size:24rpx; background:#edf1f8; color:#52627b; }.scope_tab.active { background:#dceaff; color:#1f5aa6; font-weight:700; }.report_card { border:0; text-align:left; }
+
 .page_header {
   margin: 4rpx 6rpx 28rpx;
 }

@@ -71,10 +71,10 @@
           </button>
         </view>
         <view class="feature_slot">
-          <button class="feature_card" bindtap="showUnavailable">
-            <view class="feature_top"><view class="feature_icon">工单</view><view class="feature_status">{{studentStatusPreview}}</view></view>
+          <button class="feature_card" bindtap="goToStudentReports">
+            <view class="feature_top"><view class="feature_icon">工单</view><view class="feature_status">{{studentSummary.reportCountText}}</view></view>
             <view class="feature_title">我的工单</view>
-            <view class="feature_text">现有服务暂未提供工单列表入口</view>
+            <view class="feature_text">查看本人提交工单的公开处理进度</view>
           </button>
         </view>
         <view class="feature_slot">
@@ -122,31 +122,31 @@
       </view>
       <view class="feature_grid counselor_feature_grid">
         <view class="feature_slot">
-          <button class="feature_card counselor_card counselor_pending_feature" bindtap="goToCounselorReports">
+          <button class="feature_card counselor_card counselor_pending_feature" data-scope="pending" bindtap="goToCounselorReports">
             <view class="feature_top"><view class="feature_icon">待办</view></view>
             <view class="feature_title">待核验工单</view>
             <view class="feature_text">当前 {{counselorSummary.pendingVerifyCount}} 项待处理工单</view>
           </button>
         </view>
         <view class="feature_slot">
-          <button class="feature_card counselor_card" bindtap="showUnavailable">
+          <button class="feature_card counselor_card" data-scope="following" bindtap="goToCounselorReports">
             <view class="feature_top"><view class="feature_icon">处理中</view></view>
             <view class="feature_title">跟进处理中</view>
-            <view class="feature_text">现有聚合数据暂未提供</view>
+            <view class="feature_text">当前 {{counselorSummary.followingCountText}} 项由我跟进</view>
           </button>
         </view>
         <view class="feature_slot">
-          <button class="feature_card counselor_card counselor_focus_feature" bindtap="goToCounselorReports">
+          <button class="feature_card counselor_card counselor_focus_feature">
             <view class="feature_top"><view class="feature_icon">重点关注</view></view>
             <view class="feature_title">重点关注</view>
-            <view class="feature_text">高风险 {{counselorSummary.highRiskCount}} 项优先核验</view>
+            <view class="feature_text">重点关注管理将在后续完善</view>
           </button>
         </view>
         <view class="feature_slot">
-          <button class="feature_card counselor_card" bindtap="showUnavailable">
+          <button class="feature_card counselor_card" data-scope="history" bindtap="goToCounselorReports">
             <view class="feature_top"><view class="feature_icon">记录</view></view>
             <view class="feature_title">工单记录</view>
-            <view class="feature_text">已转交与历史记录暂未聚合</view>
+            <view class="feature_text">已转交与历史记录 {{counselorSummary.recordCountText}} 项</view>
           </button>
         </view>
       </view>

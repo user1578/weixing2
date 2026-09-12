@@ -110,6 +110,24 @@ async function findById(db, collection, id) {
   return result && result.data ? result.data : null;
 }
 
+async function findCurrentCounselorWorkflow(db, report, counselor) {
+  const base = {
+    canStartFollowup: report.status === 'pending_counselor_verify' && (report.currentHandlerId === undefined || report.currentHandlerId === null),
+    isCurrentHandler: report.currentHandlerId === counselor._id,
+    followupId: null,
+    followupStatus: null,
+    followupVersion: null,
+  };
+  if (!base.isCurrentHandler) return base;
+  const result = await db.collection('counselor_followups').where({
+    businessType: 'report', businessId: report._id, counselorId: counselor._id, collegeId: counselor.collegeId,
+  }).limit(10).get();
+  const followups = Array.isArray(result.data) ? result.data : [];
+  const selected = followups.find((followup) => followup && (followup.status === 'pending' || followup.status === 'in_progress')) || followups[0];
+  if (!selected) return base;
+  return { ...base, followupId: selected._id || null, followupStatus: selected.status || null, followupVersion: Number.isSafeInteger(selected.version) ? selected.version : null };
+}
+
 function createHandler({
   db,
   getWXContext,
@@ -166,6 +184,8 @@ function createHandler({
       const student = await findById(db, 'users', report.studentId);
       if (!student) return failure('INTERNAL_ERROR', '服务暂时不可用，请稍后重试');
 
+      const workflow = await findCurrentCounselorWorkflow(db, report, counselor);
+
       try {
         await db.collection('audit_logs').add({
           data: createSensitiveViewAuditLog({ counselor, report, requestId, serverDate, createAuditId }),
@@ -175,7 +195,7 @@ function createHandler({
         return failure('INTERNAL_ERROR', '服务暂时不可用，请稍后重试');
       }
 
-      return success('COUNSELOR_REPORT_DETAIL_LOADED', { report: toDetail(report, student) });
+      return success('COUNSELOR_REPORT_DETAIL_LOADED', { report: toDetail(report, student), workflow });
     } catch (error) {
       logger.error({ requestId, code: 'INTERNAL_ERROR', resourceId: null, stage: 'getCounselorReportDetail' });
       return failure('INTERNAL_ERROR', '服务暂时不可用，请稍后重试');
@@ -205,6 +225,7 @@ exports.__testables = {
   createHandler,
   createSensitiveViewAuditLog,
   findById,
+  findCurrentCounselorWorkflow,
   findUserByWxIdentityKey,
   hasCollegeId,
   isBoundToTrustedOpenId,

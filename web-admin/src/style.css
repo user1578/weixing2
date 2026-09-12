@@ -541,7 +541,8 @@ dd {
 
 .dashboard-table {
   width: 100%;
-  min-width: 620px;
+  min-width: 0;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -552,8 +553,22 @@ dd {
   border-bottom: 1px solid #e6edf7;
   color: #43536b;
   text-align: left;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
+
+.clickable-row { cursor: pointer; }
+.clickable-row:hover { background: #f3f7ff; }
+
+.reports-page { min-width: 0; }
+.report-tabs { display: flex; gap: 10px; margin: 20px 0; flex-wrap: wrap; }
+.report-tabs button { background: #edf1f8; color: #52627b; }
+.report-tabs button.active { background: #1f5aa6; color: #fff; }
+.report-detail { margin-top: 20px; }
+.report-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0; }
+.workflow-history { border-top: 1px solid #e6edf7; margin-top: 24px; padding-top: 18px; }
+.workflow-history h4 { margin: 16px 0 8px; color: #172033; }
+.workflow-history ul { margin: 0; padding-left: 20px; color: #52627b; }
 
 .dashboard-table th {
   color: #60708a;
