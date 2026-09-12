@@ -272,7 +272,7 @@ test('17. 辅导员工单入口采用浅蓝待办、白底常规、浅红重点�
   assert.doesNotMatch(counselorCss, /\[[^\]]+\]/);
 });
 
-test('18. 学生和辅导员四张入口均由 feature_slot 承担双列 flex 子项', () => {
+test('18. 学生五张、辅导员四张入口均由 feature_slot 承担双列 flex 子项', () => {
   const wxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxml'), 'utf8');
   const css = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxss'), 'utf8');
   const counselorStart = wxml.indexOf('<view class="feature_grid counselor_feature_grid">');
@@ -283,9 +283,9 @@ test('18. 学生和辅导员四张入口均由 feature_slot 承担双列 flex �
   const studentSlots = studentMarkup.match(slotPattern) || [];
   const counselorSlots = counselorMarkup.match(slotPattern) || [];
 
-  assert.equal(studentSlots.length, 4);
+  assert.equal(studentSlots.length, 5);
   assert.equal(counselorSlots.length, 4);
-  for (const label of ['风险提醒', '我要上报', '我的工单', '安全学习']) {
+  for (const label of ['风险提醒', '我要上报', '我的工单', '安全学习', '安全自测']) {
     assert.equal(studentSlots.some((slot) => slot.includes(label)), true, label);
   }
   for (const label of ['待核验工单', '跟进处理中', '重点关注', '工单记录']) {

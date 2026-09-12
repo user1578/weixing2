@@ -57,7 +57,6 @@ function normalizeProfile(profile = {}) {
     name: profile.name.trim(),
     collegeId,
     collegeName,
-    focusFlag: profile.focusFlag === true,
   };
 }
 
@@ -231,18 +230,29 @@ const pageDefinition = {
     wx.navigateTo({ url: "/pages/reports/mine/index" });
   },
 
+  goToLearning() {
+    if (!this.data.profile || this.data.profile.role !== "student") return;
+    wx.navigateTo({ url: "/pages/learning/index/index" });
+  },
+
+  goToQuiz() {
+    if (!this.data.profile || this.data.profile.role !== "student") return;
+    wx.navigateTo({ url: "/pages/quiz/index/index" });
+  },
+
   goToCounselorReports(event) {
     if (!this.data.profile || this.data.profile.role !== "counselor") return;
     const scope = event && event.currentTarget && event.currentTarget.dataset ? event.currentTarget.dataset.scope : "pending";
     wx.navigateTo({ url: `/pages/counselor/reports/index?scope=${scope === "following" || scope === "history" ? scope : "pending"}` });
   },
 
-  goToBinding() {
-    wx.navigateTo({ url: "/pages/bind/index" });
+  goToCounselorFocus() {
+    if (!this.data.profile || this.data.profile.role !== "counselor") return;
+    wx.navigateTo({ url: "/pages/counselor/focus/index" });
   },
 
-  showUnavailable() {
-    wx.showToast({ title: "现有服务暂未提供该数据入口", icon: "none" });
+  goToBinding() {
+    wx.navigateTo({ url: "/pages/bind/index" });
   },
 
 };

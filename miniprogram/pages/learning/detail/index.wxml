@@ -1,0 +1,15 @@
+<view class="page">
+  <view class="state_card" wx:if="{{loading}}">正在加载文章…</view>
+  <view class="state_card error_state" wx:elif="{{errorMessage}}">{{errorMessage}}</view>
+  <view wx:elif="{{article}}">
+    <view class="article_card">
+      <view class="article_title">{{article.title}}</view>
+      <view class="article_summary" wx:if="{{article.summary}}">{{article.summary}}</view>
+      <view class="article_content">{{article.content}}</view>
+    </view>
+    <view class="bottom_action">
+      <view class="completed_note" wx:if="{{article.completed}}">已完成学习</view>
+      <button class="primary_button" wx:else bindtap="completeArticle" loading="{{completing}}" disabled="{{completing}}">标记为已学习</button>
+    </view>
+  </view>
+</view>

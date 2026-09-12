@@ -139,8 +139,15 @@ const pageDefinition = {
 
   onFieldInput(event) {
     const field = event.currentTarget.dataset.field;
-    if (!Object.prototype.hasOwnProperty.call(this.data, field)) return;
-    this.setData({ [field]: event.detail.value });
+    const value = event.detail.value;
+    if (field === "incidentDate") this.setData({ incidentDate: value });
+    else if (field === "incidentTime") this.setData({ incidentTime: value });
+    else if (field === "involvedAmount") this.setData({ involvedAmount: value });
+    else if (field === "incidentNarrative") this.setData({ incidentNarrative: value });
+    else if (field === "suspiciousPlatform") this.setData({ suspiciousPlatform: value });
+    else if (field === "suspiciousAccount") this.setData({ suspiciousAccount: value });
+    else if (field === "contactPhone") this.setData({ contactPhone: value });
+    else if (field === "studentRemark") this.setData({ studentRemark: value });
   },
 
   onHasLossChange(event) {

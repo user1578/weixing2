@@ -1,0 +1,21 @@
+<view class="page">
+  <view class="page_header">
+    <view class="page_title">安全学习</view>
+    <view class="page_subtitle">学习常见诈骗套路，建立日常防范意识</view>
+  </view>
+
+  <view class="state_card" wx:if="{{loading && !loaded}}">正在加载学习内容…</view>
+  <view class="state_card error_state" wx:elif="{{errorMessage}}">{{errorMessage}}</view>
+  <view class="state_card" wx:elif="{{loaded && !articles.length}}">暂时没有可学习的文章。</view>
+
+  <view class="article_list" wx:elif="{{articles.length}}">
+    <view class="article_item" wx:for="{{articles}}" wx:key="articleId">
+      <button class="article_card" data-article-id="{{item.articleId}}" bindtap="openDetail">
+        <view class="article_top"><view class="category">{{item.categoryText}}</view><view class="completed_tag" wx:if="{{item.completed}}">已完成</view></view>
+        <view class="article_title">{{item.title}}</view>
+        <view class="article_summary">{{item.summary}}</view>
+        <view class="article_time" wx:if="{{item.publishedAtText}}">发布于 {{item.publishedAtText}}</view>
+      </button>
+    </view>
+  </view>
+</view>

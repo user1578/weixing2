@@ -25,7 +25,7 @@
     <block wx:if="{{profile.role === 'student'}}">
       <view class="hello_block">
         <view class="hello_title">你好，{{profile.name}}</view>
-        <view class="hello_subtitle">{{profile.focusFlag ? '请优先关注近期风险提醒' : '保持警惕，守护校园安全'}}</view>
+        <view class="hello_subtitle">保持警惕，守护校园安全</view>
       </view>
 
       <view class="risk_overview">
@@ -78,10 +78,17 @@
           </button>
         </view>
         <view class="feature_slot">
-          <button class="feature_card" bindtap="showUnavailable">
+          <button class="feature_card" bindtap="goToLearning">
             <view class="feature_top"><view class="feature_icon">学习</view></view>
             <view class="feature_title">安全学习</view>
             <view class="feature_text">持续学习常见诈骗防范知识</view>
+          </button>
+        </view>
+        <view class="feature_slot">
+          <button class="feature_card" bindtap="goToQuiz">
+            <view class="feature_top"><view class="feature_icon">自测</view></view>
+            <view class="feature_title">安全自测</view>
+            <view class="feature_text">完成单选题，检验防诈知识掌握情况</view>
           </button>
         </view>
       </view>
@@ -136,10 +143,10 @@
           </button>
         </view>
         <view class="feature_slot">
-          <button class="feature_card counselor_card counselor_focus_feature">
+          <button class="feature_card counselor_card counselor_focus_feature" bindtap="goToCounselorFocus">
             <view class="feature_top"><view class="feature_icon">重点关注</view></view>
             <view class="feature_title">重点关注</view>
-            <view class="feature_text">重点关注管理将在后续完善</view>
+            <view class="feature_text">搜索并维护本学院重点关注学生</view>
           </button>
         </view>
         <view class="feature_slot">
