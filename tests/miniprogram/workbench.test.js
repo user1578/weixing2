@@ -9,6 +9,9 @@ global.Page = () => {};
 
 const workbench = require('../../miniprogram/pages/index/index.js').__testables;
 const counselorReports = require('../../miniprogram/pages/counselor/reports/index.js').__testables;
+const studentReports = require('../../miniprogram/pages/reports/mine/index.js').__testables;
+const studentReportDetail = require('../../miniprogram/pages/reports/detail/index.js').__testables;
+const counselorReportDetail = require('../../miniprogram/pages/counselor/reports/detail/index.js').__testables;
 
 const STUDENT = {
   userId: 'usr_student_001', role: 'student', name: '学生甲', collegeId: 'college_cs', focusFlag: false,
@@ -68,7 +71,7 @@ test('1. 学生工作台只使用可信 session，并由已加载预警计算风
   assert.equal(instance.data.profile.role, 'student');
   assert.deepEqual(instance.data.studentSummary, {
     highRiskCount: 1, pendingAlertCount: 2, followingAlertCount: 1,
-    reportCountText: '2', reportHint: '本人正在处理的工单数量',
+    reportCountText: '2', activeReportCountText: '1', reportHint: '当前仍在处理中的工单',
   });
   assert.deepEqual(global.wx.calls.map((call) => call.name).sort(), ['getMiniProgramSession', 'getStudentAlerts', 'getStudentReports']);
 });
@@ -156,7 +159,7 @@ test('11. 辅导员工单页复用既有云函数并只展示安全的列表字�
   await instance.loadReports();
 
   assert.deepEqual(instance.data.reports, [{
-    reportId: 'report_001', fraudTypeText: '刷单返利诈骗', riskText: '高风险', riskClass: 'risk-high', statusText: '待核验',
+    reportId: 'report_001', fraudTypeText: '刷单返利诈骗', riskText: '高风险', riskClass: 'risk-high', statusText: '待核验', submittedAtText: '—',
   }]);
   assert.equal(JSON.stringify(instance.data.reports).includes('敏感正文'), false);
   assert.equal(global.wx.calls[0].name, 'getCounselorReports');
@@ -298,4 +301,81 @@ test('18. 学生和辅导员四张入口均由 feature_slot 承担双列 flex �
   for (const selector of selectors) {
     assert.match(selector, /^\.[a-z_][a-z0-9_-]*(?:::[a-z-]+)?(?:\s+\.[a-z_][a-z0-9_-]*(?:::[a-z-]+)?)*$/i, selector);
   }
+});
+
+test('19. 首页仅在 onShow 刷新，首次显示不会重复请求', async () => {
+  global.wx = createWx({
+    sessions: [{ ok: true, code: 'BOUND', profile: STUDENT }],
+    studentAlerts: [{ ok: true, alerts: [] }],
+    studentReportLists: [{ ok: true, reports: [] }],
+  });
+  const instance = createPageInstance(workbench.pageDefinition);
+
+  const firstShow = instance.onShow();
+  const secondShow = instance.onShow();
+  await Promise.all([firstShow, secondShow]);
+
+  assert.equal(typeof workbench.pageDefinition.onLoad, 'undefined');
+  assert.equal(global.wx.calls.filter((call) => call.name === 'getMiniProgramSession').length, 1);
+});
+
+test('20. 学生总工单和处理中工单分别按真实状态统计，指标与角标各取正确数字', () => {
+  const summary = workbench.buildStudentSummary([], [
+    { status: 'pending_counselor_verify' }, { status: 'pending_security_verify' },
+    { status: 'in_process' }, { status: 'closed' },
+  ]);
+  const wxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxml'), 'utf8');
+
+  assert.equal(summary.reportCountText, '4');
+  assert.equal(summary.activeReportCountText, '3');
+  assert.match(wxml, /studentSummary\.activeReportCountText/);
+  assert.match(wxml, /处理中工单/);
+  assert.match(wxml, /studentSummary\.reportCountText/);
+});
+
+test('21. 工单列表采用全宽 wrapper，375、390、430 宽度下不受原生 button 默认边距影响', () => {
+  const studentWxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/reports/mine/index.wxml'), 'utf8');
+  const studentCss = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/reports/mine/index.wxss'), 'utf8');
+  const counselorWxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/counselor/reports/index.wxml'), 'utf8');
+  const counselorCss = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/counselor/reports/index.wxss'), 'utf8');
+  for (const viewport of [375, 390, 430]) {
+    assert.equal(viewport >= 375, true);
+    for (const [wxml, css] of [[studentWxml, studentCss], [counselorWxml, counselorCss]]) {
+      assert.match(wxml, /<view class="report_list"[\s\S]*<view class="report_item"[\s\S]*<button class="report_card"/);
+      assert.match(css, /\.report_list\s*\{[\s\S]*width\s*:\s*100%/);
+      assert.match(css, /\.report_item\s*\{[\s\S]*box-sizing\s*:\s*border-box[\s\S]*width\s*:\s*100%/);
+      assert.match(css, /\.report_card\s*\{[\s\S]*display\s*:\s*block[\s\S]*width\s*:\s*100%[\s\S]*margin\s*:\s*0/);
+      assert.match(css, /\.report_card::after\s*\{\s*border\s*:\s*0/);
+    }
+  }
+});
+
+test('22. 工单页统一手工输出 YYYY-MM-DD HH:mm，且不保留英文 Date 字符串依赖', () => {
+  const localDate = new Date(2026, 8, 12, 19, 28);
+  for (const formatter of [studentReports.dateText, studentReportDetail.dateText, counselorReports.dateText, counselorReportDetail.dateText]) {
+    assert.equal(formatter(localDate), '2026-09-12 19:28');
+    assert.equal(formatter('invalid-date'), '—');
+  }
+  for (const sourcePath of [
+    '../../miniprogram/pages/reports/mine/index.js', '../../miniprogram/pages/reports/detail/index.js',
+    '../../miniprogram/pages/counselor/reports/index.js', '../../miniprogram/pages/counselor/reports/detail/index.js',
+  ]) {
+    const source = fs.readFileSync(path.join(__dirname, sourcePath), 'utf8');
+    assert.doesNotMatch(source, /toLocaleString|GMT\+0800|date\.toString/);
+  }
+});
+
+test('23. 欢迎语与两类详情页保留轻量信息层级和长文本换行约束', () => {
+  const indexCss = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/index/index.wxss'), 'utf8');
+  const studentDetailWxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/reports/detail/index.wxml'), 'utf8');
+  const studentDetailCss = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/reports/detail/index.wxss'), 'utf8');
+  const counselorDetailWxml = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/counselor/reports/detail/index.wxml'), 'utf8');
+  const counselorDetailCss = fs.readFileSync(path.join(__dirname, '../../miniprogram/pages/counselor/reports/detail/index.wxss'), 'utf8');
+
+  assert.match(indexCss, /\.hello_title\s*\{[\s\S]*font-size\s*:\s*38rpx[\s\S]*font-weight\s*:\s*600/);
+  assert.match(studentDetailWxml, /事件基本信息[\s\S]*工单进度[\s\S]*结案结果/);
+  assert.match(studentDetailCss, /\.info_value\s*\{[\s\S]*overflow-wrap\s*:\s*anywhere[\s\S]*word-break\s*:\s*break-all/);
+  assert.match(counselorDetailWxml, /class="primary_action"[\s\S]*开始跟进/);
+  assert.match(counselorDetailWxml, /class="secondary_action"[\s\S]*直接结案/);
+  assert.match(counselorDetailCss, /\.form_picker\s*\{[\s\S]*width\s*:\s*100%/);
 });

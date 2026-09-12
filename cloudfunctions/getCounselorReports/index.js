@@ -32,6 +32,11 @@ function hasCollegeId(user) {
   return typeof user.collegeId === 'string' && user.collegeId.trim().length > 0;
 }
 
+function isUnassignedReport(report) {
+  return report && (report.currentHandlerId === undefined || report.currentHandlerId === null ||
+    (typeof report.currentHandlerId === 'string' && report.currentHandlerId.trim() === ''));
+}
+
 function isBoundToTrustedOpenId(user, trustedOpenId) {
   return user && user.bindStatus === 'bound' &&
     typeof user.wxOpenId === 'string' && user.wxOpenId.length > 0 &&
@@ -144,7 +149,8 @@ function createHandler({
           collegeId: counselor.collegeId,
           status: 'pending_counselor_verify',
         }).orderBy('submittedAt', 'desc').limit(MAX_REPORTS).get();
-        reports = (Array.isArray(result.data) ? result.data : []).sort(compareReports).map(toListItem);
+        reports = (Array.isArray(result.data) ? result.data : [])
+          .filter(isUnassignedReport).sort(compareReports).map(toListItem);
       } else if (scope === 'following') {
         const [reportsResult, followupsResult] = await Promise.all([
           db.collection('fraud_reports').where({ collegeId: counselor.collegeId, currentHandlerId: counselor._id, status: 'pending_counselor_verify' })
@@ -202,6 +208,7 @@ exports.__testables = {
   createHandler,
   findUserByWxIdentityKey,
   hasCollegeId,
+  isUnassignedReport,
   isBoundToTrustedOpenId,
   toListItem,
   validateInput,

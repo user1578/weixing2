@@ -406,10 +406,10 @@ test('2. pending_security_verify 可结案，条件更新使用事务内当前�
   assert.deepEqual(fixture.state.audits[0].beforeSummary, { status: 'pending_security_verify' });
 });
 
-test('3. 缺少 Authorization 被拒绝且不进入事务', async () => {
+test('3. 缺少 Authorization 时即使 body 为空也先拒绝且不进入事务', async () => {
   const fixture = await createFixture();
   const before = clone(fixture.state.reports);
-  const response = await closeReport(fixture, validBody(), {});
+  const response = await closeReport(fixture, {}, {});
 
   assert.equal(response.statusCode, 401);
   assert.equal(response.json.code, 'TOKEN_MISSING');
@@ -439,6 +439,12 @@ test('4. 非法、过期 token 和非 security 用户均不能结案', async () 
 });
 
 test('5. body 严格白名单拒绝多余字段和客户端伪造身份、状态字段', async () => {
+  const emptyFixture = await createFixture();
+  const empty = await closeReport(emptyFixture, {});
+  assert.equal(empty.statusCode, 400);
+  assert.equal(empty.json.code, 'INVALID_INPUT');
+  assert.equal(emptyFixture.state.transactionCalls, 0);
+
   const forbiddenFields = {
     status: 'closed', currentHandlerId: 'usr_attacker', operatorId: 'usr_attacker', actorId: 'usr_attacker',
     actorRole: 'security', collegeId: 'college_attacker', closedAt: '2026-09-11T08:00:00.000Z',

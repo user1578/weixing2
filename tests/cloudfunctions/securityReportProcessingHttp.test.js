@@ -354,10 +354,10 @@ test('1. 成功迁移只更新 report 一次，并新增一条 disposition 和�
   assert.equal(fixture.state.followups.length, 0);
 });
 
-test('2. 缺少 Authorization 返回 TOKEN_MISSING，且没有写入', async () => {
+test('2. 缺少 Authorization 时即使 body 为空也先返回 TOKEN_MISSING，且没有写入', async () => {
   const fixture = await createFixture();
   const before = clone(fixture.state.reports[0]);
-  const response = await startProcess(fixture, validBody(), {});
+  const response = await startProcess(fixture, {}, {});
 
   assert.equal(response.statusCode, 401);
   assert.equal(response.json.code, 'TOKEN_MISSING');

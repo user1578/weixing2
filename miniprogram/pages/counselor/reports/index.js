@@ -30,16 +30,22 @@ function textFor(labels, value, fallback) {
   return labels[value] || fallback;
 }
 
+function dateText(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function toReportView(report = {}) {
-  const submittedAt = new Date(report.submittedAt);
   const view = {
     reportId: typeof report.reportId === "string" ? report.reportId : "",
     fraudTypeText: textFor(FRAUD_TYPE_LABELS, report.fraudType, "未知诈骗类型"),
     riskText: textFor(RISK_LEVEL_LABELS, report.riskLevel, "风险待评估"),
     riskClass: RISK_LEVEL_LABELS[report.riskLevel] ? `risk-${report.riskLevel}` : "risk-unknown",
     statusText: textFor(COUNSELOR_STATUS_LABELS, report.status, "状态待更新"),
+    submittedAtText: dateText(report.submittedAt),
   };
-  if (!Number.isNaN(submittedAt.getTime())) view.submittedAtText = submittedAt.toLocaleString();
   return view;
 }
 
@@ -114,5 +120,5 @@ const pageDefinition = {
 Page(pageDefinition);
 
 if (typeof module !== "undefined") {
-  module.exports = { __testables: { messageFor, pageDefinition, toReportView } };
+  module.exports = { __testables: { dateText, messageFor, pageDefinition, toReportView } };
 }

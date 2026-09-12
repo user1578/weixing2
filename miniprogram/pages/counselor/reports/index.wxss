@@ -5,7 +5,7 @@
   background: #f5f8fc;
 }
 
-.scope_tabs { display:flex; gap:12rpx; margin:0 0 20rpx; }.scope_tab { flex:1; padding:16rpx 4rpx; font-size:24rpx; background:#edf1f8; color:#52627b; }.scope_tab.active { background:#dceaff; color:#1f5aa6; font-weight:700; }.report_card { border:0; text-align:left; }
+.scope_tabs { display:flex; gap:12rpx; margin:0 0 20rpx; }.scope_tab { flex:1; padding:16rpx 4rpx; font-size:24rpx; background:#edf1f8; color:#52627b; }.scope_tab.active { background:#dceaff; color:#1f5aa6; font-weight:700; }.report_list { display:flex; flex-direction:column; width:100%; }.report_item { box-sizing:border-box; width:100%; margin-bottom:18rpx; }.report_card { box-sizing:border-box; display:block; width:100%; margin:0; border:0; text-align:left; }.report_card::after { border:0; }
 
 .page_header {
   margin: 4rpx 6rpx 28rpx;
@@ -54,7 +54,6 @@
 }
 
 .report_card {
-  margin-bottom: 18rpx;
   padding: 26rpx;
 }
 

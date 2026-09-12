@@ -3,7 +3,7 @@ const RISKS = Object.freeze({ low: "低风险", medium: "中风险", high: "高�
 const STATUSES = Object.freeze({ pending_counselor_verify: "待核验", pending_security_verify: "已转保卫处", in_process: "处理中", closed: "已结案" });
 const TRANSFER_RESULTS = Object.freeze(["confirmed", "suspected", "misreport", "consultation", "not_fraud"]);
 const CLOSE_RESULTS = Object.freeze(["misreport", "consultation", "not_fraud"]);
-function dateText(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString(); }
+function dateText(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`; }
 function reportView(report = {}) { return { ...report, fraudTypeText: FRAUD_TYPES[report.fraudType] || "未知诈骗类型", riskText: RISKS[report.riskLevel] || "风险待评估", statusText: STATUSES[report.status] || "状态待更新", incidentAtText: dateText(report.incidentAt), submittedAtText: dateText(report.submittedAt), hasLossText: report.hasLoss ? "是" : "否" }; }
 function responseError(result) { return result && result.message ? result.message : "操作未完成，请刷新后重试。"; }
 
@@ -43,4 +43,4 @@ const pageDefinition = {
   closeReport() { const report=this.data.report, workflow=this.data.workflow, verificationResult=this.data.form.verificationResult; if (!report || !workflow || workflow.followupStatus!=="in_progress" || !CLOSE_RESULTS.includes(verificationResult)) return; this.callAction("closeCounselorReport",{followupId:workflow.followupId,expectedFollowupVersion:workflow.followupVersion,expectedReportVersion:report.version,verificationResult,closeReason:this.data.form.closeReason}); },
 };
 Page(pageDefinition);
-if (typeof module !== "undefined") module.exports={__testables:{CLOSE_RESULTS,TRANSFER_RESULTS,pageDefinition,reportView,responseError}};
+if (typeof module !== "undefined") module.exports={__testables:{CLOSE_RESULTS,TRANSFER_RESULTS,dateText,pageDefinition,reportView,responseError}};

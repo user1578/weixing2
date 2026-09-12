@@ -15,15 +15,17 @@
   <view class="state_card" wx:elif="{{loaded && reports.length === 0}}">当前没有待核验工单</view>
 
   <view class="report_list" wx:elif="{{reports.length}}">
-    <button class="report_card" wx:for="{{reports}}" wx:key="reportId" data-report-id="{{item.reportId}}" bindtap="openDetail">
-      <view class="report_top">
-        <view class="fraud_type">{{item.fraudTypeText}}</view>
-        <view class="risk_tag {{item.riskClass}}">{{item.riskText}}</view>
-      </view>
-      <view class="report_bottom">
-        <view class="status_tag">{{item.statusText}}</view>
-        <view class="report_hint">提交时间：{{item.submittedAtText}}</view>
-      </view>
-    </button>
+    <view class="report_item" wx:for="{{reports}}" wx:key="reportId">
+      <button class="report_card" data-report-id="{{item.reportId}}" bindtap="openDetail">
+        <view class="report_top">
+          <view class="fraud_type">{{item.fraudTypeText}}</view>
+          <view class="risk_tag {{item.riskClass}}">{{item.riskText}}</view>
+        </view>
+        <view class="report_bottom">
+          <view class="status_tag">{{item.statusText}}</view>
+          <view class="report_hint">提交时间：{{item.submittedAtText}}</view>
+        </view>
+      </button>
+    </view>
   </view>
 </view>

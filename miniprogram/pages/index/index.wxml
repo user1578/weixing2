@@ -44,8 +44,8 @@
             <view class="metric_label">待查看提醒</view>
           </view>
           <view class="metric wide_metric">
-            <view class="metric_value">{{studentSummary.reportCountText}}</view>
-            <view class="metric_label">正在处理工单</view>
+            <view class="metric_value">{{studentSummary.activeReportCountText}}</view>
+            <view class="metric_label">处理中工单</view>
             <view class="metric_hint">{{studentSummary.reportHint}}</view>
           </view>
         </view>

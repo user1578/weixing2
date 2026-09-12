@@ -31,7 +31,8 @@ function createDb({ users = [security, counselor, student], reports = [baseRepor
 function service(options = {}) {
   const mock = createDb(options);
   let sequence = 0;
-  return { ...mock, service: createSecurityReportManagementService({ authService: { async authenticateSecuritySession() { return { ok: true, user: structuredClone(security) }; } }, db: mock.db, serverDate: () => ({ $serverDate: ++sequence }), createRequestId: () => `req_${++sequence}`, createAuditId: () => `audit_${++sequence}`, createFollowupId: () => `followup_${++sequence}`, createDispositionId: () => `disposition_${++sequence}`, logger: { error() {} }, configured: true }) };
+  const authService = options.authService || { async authenticateSecuritySession() { return { ok: true, user: structuredClone(security) }; } };
+  return { ...mock, service: createSecurityReportManagementService({ authService, db: mock.db, serverDate: () => ({ $serverDate: ++sequence }), createRequestId: () => `req_${++sequence}`, createAuditId: () => `audit_${++sequence}`, createFollowupId: () => `followup_${++sequence}`, createDispositionId: () => `disposition_${++sequence}`, logger: { error() {} }, configured: true }) };
 }
 
 test('保卫处三队列只返回最小列表字段，不泄露学生或正文', async () => {
@@ -72,6 +73,31 @@ test('原辅导员不可用时退回拒绝且事务回滚', async () => {
   assert.equal(fixture.state.reports[0].status, 'pending_security_verify');
   assert.equal(fixture.state.followups.length, 0);
   assert.equal(fixture.state.dispositions.length, 0);
+});
+
+test('受保护 return 在空 body 前优先鉴权，已登录用户的空 body 才返回 INVALID_INPUT', async () => {
+  const authenticationCalls = [];
+  const unauthorized = service({ authService: {
+    async authenticateSecuritySession(authorization) {
+      authenticationCalls.push(authorization);
+      return { ok: false, result: { ok: false, code: 'TOKEN_MISSING' } };
+    },
+  } });
+  const unauthenticatedHandler = createHttpHandler({
+    authService: { async login() { return { ok: true, code: 'AUTHENTICATED' }; }, async session() { return { ok: true, code: 'SESSION_VALID' }; } },
+    reportManagementService: unauthorized.service,
+    allowedOrigins: 'https://security.example.edu', logger: { error() {} },
+  });
+  const missing = await unauthenticatedHandler({ httpMethod: 'POST', path: '/reports/report_1/return', body: '{}', headers: {} });
+  assert.equal(missing.statusCode, 401);
+  assert.equal(JSON.parse(missing.body).code, 'TOKEN_MISSING');
+  assert.deepEqual(authenticationCalls, [undefined]);
+  assert.equal(unauthorized.state.transactionCalls, 0);
+
+  const authorized = service();
+  const invalid = await authorized.service.returnToCounselor('Bearer token', 'report_1', '{}');
+  assert.equal(invalid.code, 'INVALID_INPUT');
+  assert.equal(authorized.state.transactionCalls, 0);
 });
 
 test('HTTP 内部 reports 路由、CORS 及既有 start-process/close 路由保持精确匹配', async () => {

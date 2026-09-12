@@ -30,6 +30,12 @@ const COUNSELOR_STATUS_LABELS = Object.freeze({
   closed: "已完成",
 });
 
+const ACTIVE_REPORT_STATUSES = new Set([
+  "pending_counselor_verify",
+  "pending_security_verify",
+  "in_process",
+]);
+
 function messageFor(messages, code, fallback) {
   return messages[code] || fallback;
 }
@@ -62,12 +68,14 @@ function sameProfile(left, right) {
 function buildStudentSummary(alerts, reports = []) {
   const rows = Array.isArray(alerts) ? alerts.filter((alert) => alert && typeof alert === "object") : [];
   const reportRows = Array.isArray(reports) ? reports.filter((report) => report && typeof report === "object") : [];
+  const activeReportCount = reportRows.filter((report) => ACTIVE_REPORT_STATUSES.has(report.status)).length;
   return {
     highRiskCount: rows.filter((alert) => alert.riskLevel === "high").length,
     pendingAlertCount: rows.filter((alert) => alert.status === "sent").length,
     followingAlertCount: rows.filter((alert) => alert.status === "following_up").length,
     reportCountText: String(reportRows.length),
-    reportHint: "本人正在处理的工单数量",
+    activeReportCountText: String(activeReportCount),
+    reportHint: "当前仍在处理中的工单",
   };
 }
 
@@ -106,8 +114,8 @@ const pageDefinition = {
     counselorProgressStatus: statusTextForCounselor("in_process"),
   },
 
-  onLoad() {
-    this.refreshSession();
+  onShow() {
+    return this.refreshSession();
   },
 
   onPullDownRefresh() {
@@ -245,6 +253,7 @@ if (typeof module !== "undefined") {
   module.exports = {
     __testables: {
       REPORT_STATUS_LABELS,
+      ACTIVE_REPORT_STATUSES,
       COUNSELOR_STATUS_LABELS,
       buildCounselorSummary,
       buildStudentSummary,

@@ -92,8 +92,9 @@
 
 .hello_title {
   color: #17233d;
-  font-size: 44rpx;
-  font-weight: 700;
+  font-size: 38rpx;
+  font-weight: 600;
+  line-height: 1.35;
   overflow-wrap: anywhere;
   word-break: break-all;
 }

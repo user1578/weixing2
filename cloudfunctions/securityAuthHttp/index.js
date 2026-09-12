@@ -959,10 +959,6 @@ function createSecurityAlertService({
 
   async function create(authorization, body) {
     const requestId = createRequestId();
-    const input = parseAlertCreateBody(body);
-    if (!input) {
-      return failure('INVALID_INPUT');
-    }
     if (!dependenciesReady) {
       return internalFailure(requestId, 'securityAlertCreateConfiguration');
     }
@@ -970,6 +966,10 @@ function createSecurityAlertService({
     const authenticated = await authenticate(authorization, requestId, 'securityAlertCreateAuthentication');
     if (!authenticated.ok) {
       return authenticated.result;
+    }
+    const input = parseAlertCreateBody(body);
+    if (!input) {
+      return failure('INVALID_INPUT');
     }
 
     let requestNow;
@@ -1087,10 +1087,6 @@ function createSecurityAlertService({
 
   async function dispatch(authorization, alertId, body) {
     const requestId = createRequestId();
-    const input = parseAlertDispatchBody(body);
-    if (!input) {
-      return failure('INVALID_INPUT');
-    }
     if (!dependenciesReady) {
       return internalFailure(requestId, 'securityAlertDispatchConfiguration', alertId || null);
     }
@@ -1098,6 +1094,10 @@ function createSecurityAlertService({
     const authenticated = await authenticate(authorization, requestId, 'securityAlertDispatchAuthentication');
     if (!authenticated.ok) {
       return authenticated.result;
+    }
+    const input = parseAlertDispatchBody(body);
+    if (!input) {
+      return failure('INVALID_INPUT');
     }
 
     const auditId = createAuditId();
@@ -1188,10 +1188,6 @@ function createSecurityReportProcessingService({
 
   async function startProcess(authorization, reportId, body) {
     const requestId = createRequestId();
-    const input = parseReportStartProcessBody(body);
-    if (!input) {
-      return failure('INVALID_INPUT');
-    }
     if (!dependenciesReady) {
       return internalFailure(requestId, 'securityReportStartProcessConfiguration', reportId || null);
     }
@@ -1199,6 +1195,10 @@ function createSecurityReportProcessingService({
     const authenticated = await authenticate(authorization, requestId);
     if (!authenticated.ok) {
       return authenticated.result;
+    }
+    const input = parseReportStartProcessBody(body);
+    if (!input) {
+      return failure('INVALID_INPUT');
     }
 
     const dispositionId = createDispositionId();
@@ -1294,10 +1294,6 @@ function createSecurityReportClosingService({
 
   async function close(authorization, reportId, body) {
     const requestId = createRequestId();
-    const input = parseReportCloseBody(body);
-    if (!input) {
-      return failure('INVALID_INPUT');
-    }
     if (!dependenciesReady) {
       return internalFailure(requestId, 'securityReportCloseConfiguration', reportId || null);
     }
@@ -1305,6 +1301,10 @@ function createSecurityReportClosingService({
     const authenticated = await authenticate(authorization, requestId);
     if (!authenticated.ok) {
       return authenticated.result;
+    }
+    const input = parseReportCloseBody(body);
+    if (!input) {
+      return failure('INVALID_INPUT');
     }
 
     const dispositionId = createDispositionId();
@@ -1509,11 +1509,11 @@ function createSecurityReportManagementService({
 
   async function returnToCounselor(authorization, reportId, body) {
     const requestId = createRequestId();
-    const input = parseReportReturnBody(body);
-    if (!input || !reportId || reportId.length > 128) return failure('INVALID_INPUT');
     if (!dependenciesReady) return internalFailure(requestId, 'securityReportReturnConfiguration', reportId);
     const authenticated = await authenticate(authorization, requestId, 'securityReportReturnAuthentication');
     if (!authenticated.ok) return authenticated.result;
+    const input = parseReportReturnBody(body);
+    if (!input || !reportId || reportId.length > 128) return failure('INVALID_INPUT');
     const followupId = createFollowupId();
     const dispositionId = createDispositionId();
     const auditId = createAuditId();
@@ -1651,16 +1651,16 @@ function createSecurityIdentityManagementService({
 
   async function create(authorization, body) {
     const requestId = createRequestId();
-    const input = parseIdentityCreateBody(body);
-    if (!input) {
-      return failure('INVALID_INPUT');
-    }
     if (!dependenciesReady) {
       return internalFailure(requestId, 'securityIdentityCreateConfiguration');
     }
     const authenticated = await authenticate(authorization, requestId, 'securityIdentityCreateAuthentication');
     if (!authenticated.ok) {
       return authenticated.result;
+    }
+    const input = parseIdentityCreateBody(body);
+    if (!input) {
+      return failure('INVALID_INPUT');
     }
 
     const userId = createUserId();
@@ -1733,16 +1733,16 @@ function createSecurityIdentityManagementService({
 
   async function unbind(authorization, userId, body) {
     const requestId = createRequestId();
-    const input = parseIdentityUnbindBody(body);
-    if (!input || typeof userId !== 'string' || !userId) {
-      return failure('INVALID_INPUT');
-    }
     if (!dependenciesReady) {
       return internalFailure(requestId, 'securityIdentityUnbindConfiguration', userId || null);
     }
     const authenticated = await authenticate(authorization, requestId, 'securityIdentityUnbindAuthentication');
     if (!authenticated.ok) {
       return authenticated.result;
+    }
+    const input = parseIdentityUnbindBody(body);
+    if (!input || typeof userId !== 'string' || !userId) {
+      return failure('INVALID_INPUT');
     }
 
     const auditId = createAuditId();
@@ -1798,16 +1798,16 @@ function createSecurityIdentityManagementService({
 
   async function updateStatus(authorization, userId, body) {
     const requestId = createRequestId();
-    const input = parseIdentityStatusBody(body);
-    if (!input || typeof userId !== 'string' || !userId) {
-      return failure('INVALID_INPUT');
-    }
     if (!dependenciesReady) {
       return internalFailure(requestId, 'securityIdentityStatusConfiguration', userId || null);
     }
     const authenticated = await authenticate(authorization, requestId, 'securityIdentityStatusAuthentication');
     if (!authenticated.ok) {
       return authenticated.result;
+    }
+    const input = parseIdentityStatusBody(body);
+    if (!input || typeof userId !== 'string' || !userId) {
+      return failure('INVALID_INPUT');
     }
 
     const auditId = createAuditId();
@@ -1922,11 +1922,11 @@ function createSecurityCollegeManagementService({
 
   async function create(authorization, body) {
     const requestId = createRequestId();
-    const input = parseCollegeCreateBody(body);
-    if (!input) return failure('INVALID_INPUT');
     if (!dependenciesReady) return internalFailure(requestId, 'securityCollegeCreateConfiguration');
     const authenticated = await authenticate(authorization, requestId, 'securityCollegeCreateAuthentication');
     if (!authenticated.ok) return authenticated.result;
+    const input = parseCollegeCreateBody(body);
+    if (!input) return failure('INVALID_INPUT');
 
     const collegeId = collegeIdForName(input.name);
     const auditId = createAuditId();
@@ -1962,13 +1962,13 @@ function createSecurityCollegeManagementService({
 
   async function updateStatus(authorization, collegeId, body) {
     const requestId = createRequestId();
+    if (!dependenciesReady) return internalFailure(requestId, 'securityCollegeStatusConfiguration', collegeId || null);
+    const authenticated = await authenticate(authorization, requestId, 'securityCollegeStatusAuthentication');
+    if (!authenticated.ok) return authenticated.result;
     const input = parseCollegeStatusBody(body);
     if (!input || typeof collegeId !== 'string' || !collegeId || collegeId.length > MAX_COLLEGE_ID_LENGTH) {
       return failure('INVALID_INPUT');
     }
-    if (!dependenciesReady) return internalFailure(requestId, 'securityCollegeStatusConfiguration', collegeId || null);
-    const authenticated = await authenticate(authorization, requestId, 'securityCollegeStatusAuthentication');
-    if (!authenticated.ok) return authenticated.result;
 
     const auditId = createAuditId();
     try {

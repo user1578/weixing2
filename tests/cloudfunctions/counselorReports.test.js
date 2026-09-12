@@ -61,7 +61,7 @@ function baseReport(overrides = {}) {
     status: 'pending_counselor_verify',
     submittedAt: '2026-09-08T09:00:00.000Z',
     version: 1,
-    currentHandlerId: 'usr_internal',
+    currentHandlerId: null,
     confirmedLossAmount: 12,
     ...overrides,
   };
@@ -71,16 +71,17 @@ function matches(row, query) {
   return Object.entries(query).every(([key, value]) => row[key] === value);
 }
 
-function createMockDb({ users = [baseCounselor(), baseStudent()], reports = [], auditFailure = false } = {}) {
+function createMockDb({ users = [baseCounselor(), baseStudent()], reports = [], followups = [], auditFailure = false } = {}) {
   const state = {
     users: clone(users),
     reports: clone(reports),
+    followups: clone(followups),
     audits: [],
     queryTrace: [],
     docTrace: [],
     writes: [],
   };
-  const rowsFor = (name) => ({ users: state.users, fraud_reports: state.reports, audit_logs: state.audits }[name]);
+  const rowsFor = (name) => ({ users: state.users, fraud_reports: state.reports, counselor_followups: state.followups, audit_logs: state.audits }[name]);
   const collection = (name) => ({
     where(query) {
       const read = async ({ limit = null, orderBy = null } = {}) => {
@@ -297,6 +298,65 @@ test('20. 列表成功不写审计', async () => {
   const { listHandler, state } = makeHandlers({ reports: [baseReport()] });
   assert.equal((await listHandler({})).code, 'COUNSELOR_REPORTS_LOADED');
   assert.equal(state.audits.length, 0);
+});
+
+test('38. 待核验仅返回尚未接手的 null、缺失或空 currentHandlerId 工单', async () => {
+  const { listHandler } = makeHandlers({ reports: [
+    baseReport({ _id: 'unassigned_missing', currentHandlerId: undefined }),
+    baseReport({ _id: 'unassigned_null', currentHandlerId: null }),
+    baseReport({ _id: 'unassigned_empty', currentHandlerId: '' }),
+    baseReport({ _id: 'following', currentHandlerId: 'usr_counselor_001' }),
+    baseReport({ _id: 'owned_by_other', currentHandlerId: 'usr_counselor_other' }),
+  ] });
+  const response = await listHandler({ scope: 'pending' });
+
+  assert.deepEqual(new Set(response.reports.map((report) => report.reportId)), new Set([
+    'unassigned_missing', 'unassigned_null', 'unassigned_empty',
+  ]));
+});
+
+test('39. 已开始跟进的工单仅在 following，且必须关联 pending 或 in_progress 跟进记录', async () => {
+  const { listHandler } = makeHandlers({
+    reports: [
+      baseReport({ _id: 'following_pending', currentHandlerId: 'usr_counselor_001' }),
+      baseReport({ _id: 'following_progress', currentHandlerId: 'usr_counselor_001' }),
+      baseReport({ _id: 'completed_followup', currentHandlerId: 'usr_counselor_001' }),
+    ],
+    followups: [
+      { _id: 'followup_1', businessType: 'report', businessId: 'following_pending', counselorId: 'usr_counselor_001', collegeId: 'college_cs', status: 'pending', version: 1 },
+      { _id: 'followup_2', businessType: 'report', businessId: 'following_progress', counselorId: 'usr_counselor_001', collegeId: 'college_cs', status: 'in_progress', version: 1 },
+      { _id: 'followup_3', businessType: 'report', businessId: 'completed_followup', counselorId: 'usr_counselor_001', collegeId: 'college_cs', status: 'completed', version: 1 },
+    ],
+  });
+  const pending = await listHandler({ scope: 'pending' });
+  const following = await listHandler({ scope: 'following' });
+
+  assert.deepEqual(pending.reports, []);
+  assert.deepEqual(new Set(following.reports.map((report) => report.reportId)), new Set(['following_pending', 'following_progress']));
+});
+
+test('40. 转保卫处后仅进入 history，不再属于 pending 或 following', async () => {
+  const { listHandler } = makeHandlers({ reports: [
+    baseReport({ _id: 'transferred', status: 'pending_security_verify', currentHandlerId: 'usr_counselor_001' }),
+  ] });
+  const [pending, following, history] = await Promise.all([
+    listHandler({ scope: 'pending' }), listHandler({ scope: 'following' }), listHandler({ scope: 'history' }),
+  ]);
+
+  assert.deepEqual(pending.reports, []);
+  assert.deepEqual(following.reports, []);
+  assert.deepEqual(history.reports.map((report) => report.reportId), ['transferred']);
+});
+
+test('41. 保卫处退回并新建 pending 跟进后，工单重新进入原辅导员 following 而非 pending', async () => {
+  const { listHandler } = makeHandlers({
+    reports: [baseReport({ _id: 'returned', currentHandlerId: 'usr_counselor_001' })],
+    followups: [{ _id: 'followup_returned', businessType: 'report', businessId: 'returned', counselorId: 'usr_counselor_001', collegeId: 'college_cs', status: 'pending', version: 1 }],
+  });
+  const [pending, following] = await Promise.all([listHandler({ scope: 'pending' }), listHandler({ scope: 'following' })]);
+
+  assert.deepEqual(pending.reports, []);
+  assert.deepEqual(following.reports.map((report) => report.reportId), ['returned']);
 });
 
 test('21. detail 的 reportId 非法时拒绝', async () => {
