@@ -33,6 +33,13 @@ const dispatchLoading = ref(false);
 const message = ref("");
 const successMessage = ref("");
 const createdAlert = ref(null);
+const alerts = ref([]);
+const alertsLoading = ref(false);
+const alertFilters = ref({ status: "", riskLevel: "", fraudType: "" });
+const selectedAlert = ref(null);
+const alertDetailLoading = ref(false);
+const alertActionLoading = ref(false);
+const alertCloseReason = ref("");
 const dashboard = ref(null);
 const dashboardLoading = ref(false);
 const studentNo = ref("");
@@ -61,6 +68,16 @@ const reportDetailLoading = ref(false);
 const reportActionLoading = ref(false);
 const reportActionMode = ref("");
 const reportActionForm = ref({ actionContent: "", verificationResult: "suspected", returnReason: "", finalOutcome: "loss_no_loss", confirmedLossAmount: "0", closeReason: "" });
+const riskRule = ref(null);
+const riskRuleLoading = ref(false);
+const riskRuleSaving = ref(false);
+const riskRuleForm = ref({ highAmount: 5000, midAmountMin: 1, repeatAlertWindowDays: 30, highAlertRepeatCount: 3, midAlertRepeatCount: 2, keyFraudTypes: [] });
+const statistics = ref(null);
+const statisticsLoading = ref(false);
+const auditLogs = ref([]);
+const auditLoading = ref(false);
+const auditFilters = ref({ action: "", resourceType: "", result: "" });
+const selectedAudit = ref(null);
 const isAuthenticated = computed(() => profile.value !== null);
 const canDispatch = computed(() => createdAlert.value?.status === "pending_dispatch");
 const identityNoHint = computed(() => identityForm.value.role === "student" ? "身份编号填写学号" : "身份编号填写工号");
@@ -98,6 +115,9 @@ function clearSession() {
   sessionStorage.removeItem(SESSION_TOKEN_KEY);
   profile.value = null;
   createdAlert.value = null;
+  alerts.value = [];
+  selectedAlert.value = null;
+  alertCloseReason.value = "";
   identities.value = [];
   colleges.value = [];
   dashboard.value = null;
@@ -105,6 +125,10 @@ function clearSession() {
   reportQueues.value = { pendingSecurityVerify: [], inProcess: [], closed: [] };
   selectedReport.value = null;
   reportActionMode.value = "";
+  riskRule.value = null;
+  statistics.value = null;
+  auditLogs.value = [];
+  selectedAudit.value = null;
   activeView.value = "dashboard";
   showIdentityCreatePanel.value = false;
   showCollegeCreatePanel.value = false;
@@ -157,6 +181,47 @@ function isDispatchedAlert(alert) {
     Number.isSafeInteger(alert.version);
 }
 
+function isAlertListItem(alert) {
+  return Boolean(alert) && typeof alert.alertId === "string" && alert.alertId &&
+    typeof alert.fraudType === "string" && typeof alert.riskLevel === "string" &&
+    typeof alert.status === "string" && typeof alert.collegeName === "string" &&
+    alert.createdAt && Number.isSafeInteger(alert.version) && alert.version > 0;
+}
+
+function isAlertDetailPayload(payload) {
+  const alert = payload?.alert;
+  return payload?.code === "ALERT_DETAIL_LOADED" && Boolean(alert) &&
+    typeof alert.alertId === "string" && typeof alert.fraudType === "string" &&
+    typeof alert.riskLevel === "string" && Array.isArray(alert.riskReasons) &&
+    typeof alert.status === "string" && typeof alert.content === "string" &&
+    typeof alert.collegeName === "string" && alert.createdAt && Number.isSafeInteger(alert.version) &&
+    (!payload.student || (typeof payload.student.name === "string" && typeof payload.student.studentNo === "string"));
+}
+
+function isRiskRule(rule) {
+  return Boolean(rule) && Number.isFinite(rule.highAmount) && Number.isFinite(rule.midAmountMin) &&
+    Number.isSafeInteger(rule.repeatAlertWindowDays) && Number.isSafeInteger(rule.highAlertRepeatCount) &&
+    Number.isSafeInteger(rule.midAlertRepeatCount) && Array.isArray(rule.keyFraudTypes) &&
+    rule.keyFraudTypes.every((value) => ["part_time_scam", "impersonate_public", "fake_loan", "fake_refund"].includes(value)) &&
+    Number.isSafeInteger(rule.version) && rule.version >= 0;
+}
+
+function isStatisticsPayload(payload) {
+  const overviewKeys = ["totalReports", "pendingCounselor", "pendingSecurity", "inProcess", "closed", "totalAlerts", "activeAlerts", "studentCount", "counselorCount"];
+  const riskKeys = ["low", "medium", "high"];
+  return payload?.code === "STATISTICS_LOADED" && payload.overview && payload.riskDistribution && payload.reportByFraudType &&
+    overviewKeys.every((key) => Number.isSafeInteger(payload.overview[key]) && payload.overview[key] >= 0) &&
+    riskKeys.every((key) => Number.isSafeInteger(payload.riskDistribution[key]) && payload.riskDistribution[key] >= 0) &&
+    FRAUD_TYPES.every(({ value }) => Number.isSafeInteger(payload.reportByFraudType[value]) && payload.reportByFraudType[value] >= 0) &&
+    Array.isArray(payload.reportByCollege) && Array.isArray(payload.alertByCollege) && Array.isArray(payload.dailyReports);
+}
+
+function isAuditLogItem(log) {
+  return Boolean(log) && typeof log.auditId === "string" && typeof log.actorId === "string" &&
+    typeof log.actorRole === "string" && typeof log.action === "string" && typeof log.resourceType === "string" &&
+    typeof log.resourceId === "string" && typeof log.result === "string" && typeof log.requestId === "string" && log.createdAt;
+}
+
 function alertProjection(alert) {
   return {
     alertId: alert.alertId,
@@ -201,6 +266,11 @@ function identityBindStatusLabel(value) {
 
 function identityStatusLabel(value) {
   return IDENTITY_STATUS_LABELS[value] || value;
+}
+
+function auditSummaryText(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "—";
+  return JSON.stringify(value);
 }
 
 function isIdentityListItem(identity) {
@@ -286,6 +356,180 @@ function selectNavigation(view) {
   if (view === "reports") void loadReports();
   if (view === "identities") void loadIdentities();
   if (view === "colleges") void loadColleges();
+  if (view === "alerts") void loadAlerts();
+  if (view === "risk-rules") void loadRiskRule();
+  if (view === "statistics") void loadStatistics();
+  if (view === "audit-logs") void loadAuditLogs();
+}
+
+function alertQueryString() {
+  const query = new URLSearchParams();
+  ["status", "riskLevel", "fraudType"].forEach((key) => {
+    const value = alertFilters.value[key];
+    if (typeof value === "string" && value) query.set(key, value);
+  });
+  const serialized = query.toString();
+  return serialized ? `?${serialized}` : "";
+}
+
+async function loadAlerts() {
+  if (alertsLoading.value || !isAuthenticated.value || !requireApiBaseUrl()) return;
+  alertsLoading.value = true;
+  try {
+    const response = await fetch(`${apiBaseUrl}/alerts${alertQueryString()}`, { method: "GET", headers: { Authorization: `Bearer ${currentToken()}` } });
+    const payload = await readApiResponse(response);
+    if (payload.code !== "ALERTS_LOADED" || !Array.isArray(payload.alerts) || payload.alerts.length > 100 || !payload.alerts.every(isAlertListItem)) {
+      throw new ApiError("INTERNAL_ERROR");
+    }
+    alerts.value = payload.alerts.map((alert) => ({ ...alert }));
+    message.value = "";
+  } catch (error) { handleApiError(error); }
+  finally { alertsLoading.value = false; }
+}
+
+async function loadAlertDetail(alertId) {
+  if (!alertId || alertDetailLoading.value || !requireApiBaseUrl()) return;
+  alertDetailLoading.value = true;
+  try {
+    const response = await fetch(`${apiBaseUrl}/alerts/${encodeURIComponent(alertId)}`, { method: "GET", headers: { Authorization: `Bearer ${currentToken()}` } });
+    const payload = await readApiResponse(response);
+    if (!isAlertDetailPayload(payload)) throw new ApiError("INTERNAL_ERROR");
+    selectedAlert.value = { alert: { ...payload.alert }, student: payload.student ? { ...payload.student } : null };
+    alertCloseReason.value = "";
+    message.value = "";
+  } catch (error) { handleApiError(error); }
+  finally { alertDetailLoading.value = false; }
+}
+
+function openAlertDetail(alertId) {
+  selectedAlert.value = null;
+  successMessage.value = "";
+  message.value = "";
+  void loadAlertDetail(alertId);
+}
+
+async function dispatchSelectedAlert() {
+  const detail = selectedAlert.value;
+  if (!detail || detail.alert.status !== "pending_dispatch" || alertActionLoading.value || !requireApiBaseUrl()) return;
+  alertActionLoading.value = true;
+  try {
+    const response = await fetch(`${apiBaseUrl}/alerts/${encodeURIComponent(detail.alert.alertId)}/dispatch`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentToken()}` },
+      body: JSON.stringify({ version: detail.alert.version }),
+    });
+    const payload = await readApiResponse(response);
+    if (payload.code !== "ALERT_DISPATCHED" || !isDispatchedAlert(payload.alert)) throw new ApiError("INTERNAL_ERROR");
+    successMessage.value = "预警已成功下发。";
+    await loadAlerts();
+    await loadAlertDetail(detail.alert.alertId);
+  } catch (error) { handleApiError(error); }
+  finally { alertActionLoading.value = false; }
+}
+
+async function closeSelectedAlert() {
+  const detail = selectedAlert.value;
+  const closeReason = alertCloseReason.value.trim();
+  if (!detail || !["sent", "viewed", "following_up"].includes(detail.alert.status) || alertActionLoading.value || !requireApiBaseUrl()) return;
+  if (!closeReason || closeReason.length > 1000) return setError("INVALID_INPUT");
+  alertActionLoading.value = true;
+  try {
+    const response = await fetch(`${apiBaseUrl}/alerts/${encodeURIComponent(detail.alert.alertId)}/close`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentToken()}` },
+      body: JSON.stringify({ version: detail.alert.version, closeReason }),
+    });
+    const payload = await readApiResponse(response);
+    if (payload.code !== "ALERT_CLOSED" || !isDispatchedAlert(payload.alert)) throw new ApiError("INTERNAL_ERROR");
+    successMessage.value = "预警已关闭。";
+    await loadAlerts();
+    await loadAlertDetail(detail.alert.alertId);
+  } catch (error) { handleApiError(error); }
+  finally { alertActionLoading.value = false; }
+}
+
+async function loadRiskRule() {
+  if (riskRuleLoading.value || !isAuthenticated.value || !requireApiBaseUrl()) return;
+  riskRuleLoading.value = true;
+  try {
+    const response = await fetch(`${apiBaseUrl}/risk-rules/default`, { method: "GET", headers: { Authorization: `Bearer ${currentToken()}` } });
+    const payload = await readApiResponse(response);
+    if (payload.code !== "RISK_RULE_LOADED" || !isRiskRule(payload.rule)) throw new ApiError("INTERNAL_ERROR");
+    riskRule.value = { ...payload.rule, keyFraudTypes: [...payload.rule.keyFraudTypes] };
+    riskRuleForm.value = { ...riskRule.value, keyFraudTypes: [...riskRule.value.keyFraudTypes] };
+    message.value = "";
+  } catch (error) { handleApiError(error); }
+  finally { riskRuleLoading.value = false; }
+}
+
+function validRiskRuleForm() {
+  const form = riskRuleForm.value;
+  const allowedTypes = ["part_time_scam", "impersonate_public", "fake_loan", "fake_refund"];
+  return Number.isFinite(Number(form.highAmount)) && Number.isFinite(Number(form.midAmountMin)) &&
+    Number(form.highAmount) > Number(form.midAmountMin) && Number(form.midAmountMin) >= 0 &&
+    Number.isInteger(Number(form.repeatAlertWindowDays)) && Number(form.repeatAlertWindowDays) >= 1 && Number(form.repeatAlertWindowDays) <= 365 &&
+    Number.isInteger(Number(form.highAlertRepeatCount)) && Number(form.highAlertRepeatCount) >= 1 && Number(form.highAlertRepeatCount) <= 100 &&
+    Number.isInteger(Number(form.midAlertRepeatCount)) && Number(form.midAlertRepeatCount) >= 1 && Number(form.midAlertRepeatCount) <= 100 &&
+    Array.isArray(form.keyFraudTypes) && form.keyFraudTypes.length > 0 && new Set(form.keyFraudTypes).size === form.keyFraudTypes.length &&
+    form.keyFraudTypes.every((value) => allowedTypes.includes(value));
+}
+
+async function saveRiskRule() {
+  if (riskRuleSaving.value || !riskRule.value || !requireApiBaseUrl()) return;
+  if (!validRiskRuleForm()) return setError("INVALID_INPUT");
+  if (!window.confirm("修改风险规则会影响后续新预警和新上报的风险判断，是否继续？")) return;
+  riskRuleSaving.value = true;
+  try {
+    const form = riskRuleForm.value;
+    const response = await fetch(`${apiBaseUrl}/risk-rules/default`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentToken()}` },
+      body: JSON.stringify({ highAmount: Number(form.highAmount), midAmountMin: Number(form.midAmountMin), repeatAlertWindowDays: Number(form.repeatAlertWindowDays), highAlertRepeatCount: Number(form.highAlertRepeatCount), midAlertRepeatCount: Number(form.midAlertRepeatCount), keyFraudTypes: [...form.keyFraudTypes], version: riskRule.value.version }),
+    });
+    const payload = await readApiResponse(response);
+    if (payload.code !== "RISK_RULE_UPDATED" || !isRiskRule(payload.rule)) throw new ApiError("INTERNAL_ERROR");
+    riskRule.value = { ...payload.rule, keyFraudTypes: [...payload.rule.keyFraudTypes] };
+    riskRuleForm.value = { ...riskRule.value, keyFraudTypes: [...riskRule.value.keyFraudTypes] };
+    successMessage.value = "风险规则已保存，仅影响后续业务。";
+  } catch (error) { handleApiError(error); }
+  finally { riskRuleSaving.value = false; }
+}
+
+async function loadStatistics() {
+  if (statisticsLoading.value || !isAuthenticated.value || !requireApiBaseUrl()) return;
+  statisticsLoading.value = true;
+  try {
+    const response = await fetch(`${apiBaseUrl}/statistics`, { method: "GET", headers: { Authorization: `Bearer ${currentToken()}` } });
+    const payload = await readApiResponse(response);
+    if (!isStatisticsPayload(payload)) throw new ApiError("INTERNAL_ERROR");
+    statistics.value = { ...payload, reportByCollege: payload.reportByCollege.map((item) => ({ ...item })), alertByCollege: payload.alertByCollege.map((item) => ({ ...item })), dailyReports: payload.dailyReports.map((item) => ({ ...item })) };
+    message.value = "";
+  } catch (error) { handleApiError(error); }
+  finally { statisticsLoading.value = false; }
+}
+
+function auditQueryString() {
+  const query = new URLSearchParams();
+  ["action", "resourceType", "result"].forEach((key) => {
+    const value = auditFilters.value[key];
+    if (typeof value === "string" && value.trim()) query.set(key, value.trim());
+  });
+  const serialized = query.toString();
+  return serialized ? `?${serialized}` : "";
+}
+
+async function loadAuditLogs() {
+  if (auditLoading.value || !isAuthenticated.value || !requireApiBaseUrl()) return;
+  auditLoading.value = true;
+  try {
+    const response = await fetch(`${apiBaseUrl}/audit-logs${auditQueryString()}`, { method: "GET", headers: { Authorization: `Bearer ${currentToken()}` } });
+    const payload = await readApiResponse(response);
+    if (payload.code !== "AUDIT_LOGS_LOADED" || !Array.isArray(payload.logs) || payload.logs.length > 200 || !payload.logs.every(isAuditLogItem)) throw new ApiError("INTERNAL_ERROR");
+    auditLogs.value = payload.logs.map((log) => ({ ...log }));
+    message.value = "";
+  } catch (error) { handleApiError(error); }
+  finally { auditLoading.value = false; }
+}
+
+function selectAudit(log) {
+  selectedAudit.value = { ...log };
 }
 
 async function loadReports() {
@@ -730,6 +974,7 @@ async function createAlert() {
     }
     createdAlert.value = alertProjection(payload.alert);
     successMessage.value = "预警创建成功";
+    await loadAlerts();
   } catch (error) {
     handleApiError(error);
   } finally {
@@ -763,6 +1008,7 @@ async function dispatchAlert() {
       version: payload.alert.version,
     };
     successMessage.value = "预警已成功下发";
+    await loadAlerts();
   } catch (error) {
     handleApiError(error);
   } finally {
@@ -826,6 +1072,9 @@ onMounted(() => {
           <button type="button" :class="{ active: activeView === 'reports' }" @click="selectNavigation('reports')">工单管理</button>
           <button type="button" :class="{ active: activeView === 'identities' }" @click="selectNavigation('identities')">身份管理</button>
           <button type="button" :class="{ active: activeView === 'colleges' }" @click="selectNavigation('colleges')">学院管理</button>
+          <button type="button" :class="{ active: activeView === 'risk-rules' }" @click="selectNavigation('risk-rules')">风险规则</button>
+          <button type="button" :class="{ active: activeView === 'statistics' }" @click="selectNavigation('statistics')">统计中心</button>
+          <button type="button" :class="{ active: activeView === 'audit-logs' }" @click="selectNavigation('audit-logs')">审计记录</button>
         </nav>
         <div class="sidebar-footer">
           <p>当前用户：{{ profile.name }}</p>
@@ -874,63 +1123,47 @@ onMounted(() => {
 
             <section class="dashboard-grid dashboard-bottom-grid">
               <article class="panel dashboard-panel"><h3>人员与学院概览</h3><dl class="summary-list"><div><dt>学生身份</dt><dd>{{ dashboard.identitySummary.studentCount }}</dd></div><div><dt>辅导员身份</dt><dd>{{ dashboard.identitySummary.counselorCount }}</dd></div><div><dt>已绑定</dt><dd>{{ dashboard.identitySummary.boundCount }}</dd></div><div><dt>未绑定</dt><dd>{{ dashboard.identitySummary.unboundCount }}</dd></div><div><dt>启用学院</dt><dd>{{ dashboard.collegeSummary.activeCount }} / {{ dashboard.collegeSummary.totalCount }}</dd></div></dl></article>
-              <article class="panel dashboard-panel"><h3>快捷操作</h3><div class="quick-actions"><button type="button" @click="selectNavigation('alerts')">新建预警</button><button type="button" class="secondary-button" @click="selectNavigation('identities')">身份管理</button><button type="button" class="secondary-button" @click="selectNavigation('colleges')">学院管理</button></div></article>
+              <article class="panel dashboard-panel"><h3>快捷操作</h3><div class="quick-actions"><button type="button" @click="selectNavigation('alerts')">预警管理</button><button type="button" class="secondary-button" @click="selectNavigation('identities')">身份管理</button><button type="button" class="secondary-button" @click="selectNavigation('risk-rules')">风险规则</button><button type="button" class="secondary-button" @click="selectNavigation('statistics')">统计中心</button></div></article>
             </section>
           </template>
         </section>
 
-        <template v-else-if="activeView === 'alerts'">
-          <section class="panel" aria-labelledby="create-alert-title">
-            <h2 id="create-alert-title">创建预警</h2>
-            <form class="alert-form" @submit.prevent="createAlert">
-              <label>
-                学号
-                <input v-model="studentNo" name="studentNo" type="text" maxlength="64" required :disabled="createLoading" />
-              </label>
+        <section v-else-if="activeView === 'alerts'" class="identity-page" aria-labelledby="alerts-title">
+          <header class="section-page-header">
+            <div><h2 id="alerts-title">预警管理</h2><p>列表仅展示安全处置所需的非敏感字段。</p></div>
+            <button type="button" class="secondary-button" :disabled="alertsLoading" @click="loadAlerts">{{ alertsLoading ? "刷新中…" : "刷新预警" }}</button>
+          </header>
 
-              <label>
-                诈骗类型
-                <select v-model="fraudType" name="fraudType" :disabled="createLoading">
-                  <option v-for="item in FRAUD_TYPES" :key="item.value" :value="item.value">{{ item.label }}</option>
-                </select>
-              </label>
-
-              <label>
-                预警内容
-                <textarea v-model="content" name="content" maxlength="1000" required :disabled="createLoading" />
-              </label>
-
-              <label>
-                来源说明（选填）
-                <input v-model="sourceReference" name="sourceReference" type="text" maxlength="128" :disabled="createLoading" />
-              </label>
-
-              <button type="submit" :disabled="createLoading">
-                {{ createLoading ? "创建中…" : "创建预警" }}
-              </button>
-            </form>
-          </section>
-
-          <section v-if="createdAlert" class="panel result-panel" aria-labelledby="alert-result-title" aria-live="polite">
-            <div class="result-header">
-              <div>
-                <p class="eyebrow">预警创建结果</p>
-                <h2 id="alert-result-title">预警创建成功</h2>
-              </div>
-              <button v-if="canDispatch" type="button" :disabled="dispatchLoading" @click="dispatchAlert">
-                {{ dispatchLoading ? "下发中…" : "下发预警" }}
-              </button>
+          <section class="panel filter-panel">
+            <div class="filter-row">
+              <label>状态<select v-model="alertFilters.status" @change="loadAlerts"><option value="">全部状态</option><option value="pending_dispatch">待下发</option><option value="sent">已下发</option><option value="viewed">已查看</option><option value="following_up">跟进中</option><option value="closed">已关闭</option></select></label>
+              <label>风险等级<select v-model="alertFilters.riskLevel" @change="loadAlerts"><option value="">全部等级</option><option value="low">低风险</option><option value="medium">中风险</option><option value="high">高风险</option></select></label>
+              <label>诈骗类型<select v-model="alertFilters.fraudType" @change="loadAlerts"><option value="">全部类型</option><option v-for="item in FRAUD_TYPES" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
             </div>
-            <dl class="result-list">
-              <div><dt>预警 ID</dt><dd class="breakable">{{ createdAlert.alertId }}</dd></div>
-              <div><dt>诈骗类型</dt><dd>{{ fraudTypeLabel(createdAlert.fraudType) }}</dd></div>
-              <div><dt>风险等级</dt><dd>{{ riskLevelLabel(createdAlert.riskLevel) }}</dd></div>
-              <div><dt>风险原因</dt><dd><span v-if="createdAlert.riskReasons.length === 0">无</span><ul v-else class="reason-list"><li v-for="reason in createdAlert.riskReasons" :key="reason">{{ reason }}</li></ul></dd></div>
-              <div><dt>状态</dt><dd>{{ statusLabel(createdAlert.status) }}</dd></div>
-              <div><dt>版本</dt><dd>{{ createdAlert.version }}</dd></div>
-            </dl>
           </section>
-        </template>
+
+          <section class="panel identity-panel">
+            <p v-if="alertsLoading" class="table-state">正在加载预警列表…</p>
+            <p v-else-if="alerts.length === 0" class="table-state">暂无符合条件的预警。</p>
+            <div v-else class="table-scroll"><table class="identity-table alert-table"><thead><tr><th>诈骗类型</th><th>风险等级</th><th>状态</th><th>学院</th><th>创建时间</th><th>操作</th></tr></thead><tbody><tr v-for="alert in alerts" :key="alert.alertId"><td>{{ fraudTypeLabel(alert.fraudType) }}</td><td>{{ riskLevelLabel(alert.riskLevel) }}</td><td>{{ statusLabel(alert.status) }}</td><td>{{ alert.collegeName || "—" }}</td><td>{{ displayDate(alert.createdAt) }}</td><td><button type="button" class="text-button" @click="openAlertDetail(alert.alertId)">查看详情</button></td></tr></tbody></table></div>
+          </section>
+
+          <section v-if="alertDetailLoading" class="panel table-state">正在加载预警详情…</section>
+          <section v-else-if="selectedAlert" class="panel report-detail" aria-live="polite">
+            <header class="result-header"><div><p class="eyebrow">预警详情</p><h3>{{ fraudTypeLabel(selectedAlert.alert.fraudType) }}</h3></div><button type="button" class="secondary-button" @click="selectedAlert = null">关闭详情</button></header>
+            <dl class="result-list"><div v-if="selectedAlert.student"><dt>学生</dt><dd>{{ selectedAlert.student.name }}（{{ selectedAlert.student.studentNo }}）</dd></div><div><dt>学院</dt><dd>{{ selectedAlert.alert.collegeName || "—" }}</dd></div><div><dt>风险等级</dt><dd>{{ riskLevelLabel(selectedAlert.alert.riskLevel) }}</dd></div><div><dt>状态</dt><dd>{{ statusLabel(selectedAlert.alert.status) }}</dd></div><div><dt>预警内容</dt><dd class="breakable">{{ selectedAlert.alert.content }}</dd></div><div><dt>风险原因</dt><dd><span v-if="selectedAlert.alert.riskReasons.length === 0">无</span><ul v-else class="reason-list"><li v-for="reason in selectedAlert.alert.riskReasons" :key="reason">{{ reason }}</li></ul></dd></div><div><dt>创建时间</dt><dd>{{ displayDate(selectedAlert.alert.createdAt) }}</dd></div><div><dt>下发时间</dt><dd>{{ displayDate(selectedAlert.alert.sentAt) }}</dd></div><div><dt>查看时间</dt><dd>{{ displayDate(selectedAlert.alert.viewedAt) }}</dd></div><div><dt>关闭时间</dt><dd>{{ displayDate(selectedAlert.alert.closedAt) }}</dd></div></dl>
+            <div v-if="selectedAlert.alert.status === 'pending_dispatch'" class="report-actions"><button type="button" :disabled="alertActionLoading" @click="dispatchSelectedAlert">{{ alertActionLoading ? "下发中…" : "下发预警" }}</button></div>
+            <form v-else-if="['sent', 'viewed', 'following_up'].includes(selectedAlert.alert.status)" class="alert-close-form" @submit.prevent="closeSelectedAlert"><label>关闭原因<textarea v-model="alertCloseReason" maxlength="1000" required :disabled="alertActionLoading" /></label><button type="submit" :disabled="alertActionLoading">{{ alertActionLoading ? "关闭中…" : "关闭预警" }}</button></form>
+            <p v-else class="table-state">已关闭预警仅可只读查看。</p>
+          </section>
+
+          <section class="panel create-alert-panel" aria-labelledby="create-alert-title">
+            <h3 id="create-alert-title">新增预警</h3>
+            <form class="alert-form" @submit.prevent="createAlert"><label>学号<input v-model="studentNo" name="studentNo" type="text" maxlength="64" required :disabled="createLoading" /></label><label>诈骗类型<select v-model="fraudType" name="fraudType" :disabled="createLoading"><option v-for="item in FRAUD_TYPES" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label>预警内容<textarea v-model="content" name="content" maxlength="1000" required :disabled="createLoading" /></label><label>来源说明（选填）<input v-model="sourceReference" name="sourceReference" type="text" maxlength="128" :disabled="createLoading" /></label><button type="submit" :disabled="createLoading">{{ createLoading ? "创建中…" : "创建预警" }}</button></form>
+          </section>
+
+          <section v-if="createdAlert" class="panel result-panel" aria-labelledby="alert-result-title" aria-live="polite"><div class="result-header"><div><p class="eyebrow">预警创建结果</p><h3 id="alert-result-title">预警创建成功</h3></div><button v-if="canDispatch" type="button" :disabled="dispatchLoading" @click="dispatchAlert">{{ dispatchLoading ? "下发中…" : "下发预警" }}</button></div><dl class="result-list"><div><dt>预警 ID</dt><dd class="breakable">{{ createdAlert.alertId }}</dd></div><div><dt>诈骗类型</dt><dd>{{ fraudTypeLabel(createdAlert.fraudType) }}</dd></div><div><dt>风险等级</dt><dd>{{ riskLevelLabel(createdAlert.riskLevel) }}</dd></div><div><dt>风险原因</dt><dd><span v-if="createdAlert.riskReasons.length === 0">无</span><ul v-else class="reason-list"><li v-for="reason in createdAlert.riskReasons" :key="reason">{{ reason }}</li></ul></dd></div><div><dt>状态</dt><dd>{{ statusLabel(createdAlert.status) }}</dd></div></dl></section>
+        </section>
 
         <section v-else-if="activeView === 'reports'" class="reports-page" aria-labelledby="reports-title">
           <header class="section-page-header"><div><p class="eyebrow">工单管理</p><h2 id="reports-title">保卫处工单队列</h2><p>只展示已通过保卫处会话授权读取的真实工单。</p></div><button type="button" class="secondary-button" :disabled="reportsLoading" @click="loadReports">{{ reportsLoading ? '刷新中…' : '刷新队列' }}</button></header>
@@ -1015,6 +1248,24 @@ onMounted(() => {
               <form class="identity-form" @submit.prevent="createCollege"><label>学院名称<input v-model="collegeName" name="collegeName" maxlength="64" required :disabled="collegeSaving" /></label><button type="submit" :disabled="collegeSaving">{{ collegeSaving ? "创建中…" : "创建学院" }}</button></form>
             </section>
           </div>
+        </section>
+
+        <section v-else-if="activeView === 'risk-rules'" class="identity-page" aria-labelledby="risk-rules-title">
+          <header class="section-page-header"><div><h2 id="risk-rules-title">风险规则</h2><p>规则修改仅影响后续业务，不追溯修改已有记录。</p></div><button type="button" class="secondary-button" :disabled="riskRuleLoading" @click="loadRiskRule">{{ riskRuleLoading ? "刷新中…" : "刷新规则" }}</button></header>
+          <section class="panel"><p v-if="riskRuleLoading && !riskRule" class="table-state">正在加载风险规则…</p><form v-else-if="riskRule" class="risk-rule-form" @submit.prevent="saveRiskRule"><label>高风险金额阈值<input v-model="riskRuleForm.highAmount" type="number" min="0" step="0.01" :disabled="riskRuleSaving" required /></label><label>中风险起始金额<input v-model="riskRuleForm.midAmountMin" type="number" min="0" step="0.01" :disabled="riskRuleSaving" required /></label><label>重复预警观察天数<input v-model="riskRuleForm.repeatAlertWindowDays" type="number" min="1" max="365" step="1" :disabled="riskRuleSaving" required /></label><label>高风险重复次数<input v-model="riskRuleForm.highAlertRepeatCount" type="number" min="1" max="100" step="1" :disabled="riskRuleSaving" required /></label><label>中风险重复次数<input v-model="riskRuleForm.midAlertRepeatCount" type="number" min="1" max="100" step="1" :disabled="riskRuleSaving" required /></label><fieldset :disabled="riskRuleSaving"><legend>重点诈骗类型</legend><label v-for="item in FRAUD_TYPES.filter((item) => item.value !== 'other')" :key="item.value" class="checkbox-label"><input v-model="riskRuleForm.keyFraudTypes" type="checkbox" :value="item.value" />{{ item.label }}</label></fieldset><button type="submit" :disabled="riskRuleSaving">{{ riskRuleSaving ? "保存中…" : "保存规则" }}</button></form></section>
+        </section>
+
+        <section v-else-if="activeView === 'statistics'" class="identity-page" aria-labelledby="statistics-title">
+          <header class="section-page-header"><div><h2 id="statistics-title">统计中心</h2><p>仅展示聚合数据，不包含个人信息或业务正文。</p></div><button type="button" class="secondary-button" :disabled="statisticsLoading" @click="loadStatistics">{{ statisticsLoading ? "刷新中…" : "刷新统计" }}</button></header>
+          <p v-if="statisticsLoading && !statistics" class="table-state">正在加载统计数据…</p>
+          <template v-else-if="statistics"><section class="metric-grid statistics-metrics"><article class="metric-card"><span>总工单</span><strong>{{ statistics.overview.totalReports }}</strong></article><article class="metric-card"><span>处理中</span><strong>{{ statistics.overview.inProcess }}</strong></article><article class="metric-card"><span>已结案</span><strong>{{ statistics.overview.closed }}</strong></article><article class="metric-card"><span>预警总数</span><strong>{{ statistics.overview.totalAlerts }}</strong></article><article class="metric-card"><span>学生数</span><strong>{{ statistics.overview.studentCount }}</strong></article><article class="metric-card"><span>辅导员数</span><strong>{{ statistics.overview.counselorCount }}</strong></article></section><section class="statistics-grid"><article class="panel dashboard-panel"><h3>风险等级分布</h3><dl class="distribution-list"><div v-for="level in ['low', 'medium', 'high']" :key="level"><dt>{{ riskLevelLabel(level) }}</dt><dd><span class="distribution-bar"><i :style="{ width: `${statistics.overview.totalReports ? (statistics.riskDistribution[level] / statistics.overview.totalReports) * 100 : 0}%` }" /></span>{{ statistics.riskDistribution[level] }}</dd></div></dl></article><article class="panel dashboard-panel"><h3>诈骗类型分布</h3><dl class="distribution-list"><div v-for="item in FRAUD_TYPES" :key="item.value"><dt>{{ item.label }}</dt><dd><span class="distribution-bar"><i :style="{ width: `${statistics.overview.totalReports ? (statistics.reportByFraudType[item.value] / statistics.overview.totalReports) * 100 : 0}%` }" /></span>{{ statistics.reportByFraudType[item.value] }}</dd></div></dl></article></section><section class="statistics-grid"><article class="panel identity-panel"><h3 class="panel-title">学院工单统计</h3><div class="table-scroll"><table class="identity-table compact-table"><thead><tr><th>学院</th><th>工单数</th></tr></thead><tbody><tr v-for="item in statistics.reportByCollege" :key="item.collegeId"><td>{{ item.collegeName }}</td><td>{{ item.reportCount }}</td></tr></tbody></table></div></article><article class="panel identity-panel"><h3 class="panel-title">学院预警统计</h3><div class="table-scroll"><table class="identity-table compact-table"><thead><tr><th>学院</th><th>预警数</th></tr></thead><tbody><tr v-for="item in statistics.alertByCollege" :key="item.collegeId"><td>{{ item.collegeName }}</td><td>{{ item.alertCount }}</td></tr></tbody></table></div></article></section><section class="panel identity-panel"><h3 class="panel-title">近7日新增工单</h3><div class="table-scroll"><table class="identity-table compact-table"><thead><tr><th>日期</th><th>新增工单数</th></tr></thead><tbody><tr v-for="item in statistics.dailyReports" :key="item.date"><td>{{ item.date }}</td><td>{{ item.count }}</td></tr></tbody></table></div></section></template>
+        </section>
+
+        <section v-else-if="activeView === 'audit-logs'" class="identity-page" aria-labelledby="audit-logs-title">
+          <header class="section-page-header"><div><h2 id="audit-logs-title">审计记录</h2><p>仅展示最小审计摘要，不展示敏感业务正文。</p></div><button type="button" class="secondary-button" :disabled="auditLoading" @click="loadAuditLogs">{{ auditLoading ? "刷新中…" : "刷新记录" }}</button></header>
+          <section class="panel filter-panel"><div class="filter-row"><label>操作 action<input v-model="auditFilters.action" maxlength="128" @change="loadAuditLogs" /></label><label>资源类型<input v-model="auditFilters.resourceType" maxlength="128" @change="loadAuditLogs" /></label><label>结果<input v-model="auditFilters.result" maxlength="128" @change="loadAuditLogs" /></label></div></section>
+          <section class="panel identity-panel"><p v-if="auditLoading" class="table-state">正在加载审计记录…</p><p v-else-if="auditLogs.length === 0" class="table-state">暂无符合条件的审计记录。</p><div v-else class="table-scroll"><table class="identity-table audit-table"><thead><tr><th>时间</th><th>角色</th><th>操作</th><th>资源类型</th><th>资源 ID</th><th>结果</th><th>请求 ID</th></tr></thead><tbody><tr v-for="log in auditLogs" :key="log.auditId" class="clickable-row" @click="selectAudit(log)"><td>{{ displayDate(log.createdAt) }}</td><td>{{ log.actorRole }}</td><td>{{ log.action }}</td><td>{{ log.resourceType }}</td><td>{{ log.resourceId }}</td><td>{{ log.result }}</td><td>{{ log.requestId }}</td></tr></tbody></table></div></section>
+          <section v-if="selectedAudit" class="panel report-detail"><header class="result-header"><div><p class="eyebrow">审计详情</p><h3>{{ selectedAudit.action }}</h3></div><button type="button" class="secondary-button" @click="selectedAudit = null">关闭详情</button></header><dl class="result-list"><div><dt>失败原因</dt><dd>{{ selectedAudit.failureReason || "—" }}</dd></div><div><dt>变更前摘要</dt><dd class="breakable">{{ auditSummaryText(selectedAudit.beforeSummary) }}</dd></div><div><dt>变更后摘要</dt><dd class="breakable">{{ auditSummaryText(selectedAudit.afterSummary) }}</dd></div></dl></section>
         </section>
       </section>
     </section>

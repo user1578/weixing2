@@ -92,3 +92,20 @@ test('9. 工单管理加载真实三队列、敏感详情与受限状态操作',
   assert.match(appSource, /await loadReports\(\);/);
   assert.match(appSource, /await loadReportDetail\(report\.reportId\);/);
 });
+
+test('10. 安全管理新增页面使用受保护接口且预警列表不渲染敏感来源字段', () => {
+  for (const label of ['风险规则', '统计中心', '审计记录', '预警管理', '学院工单统计', '学院预警统计', '近7日新增工单']) {
+    assert.match(appSource, new RegExp(`>${label}<`));
+  }
+  assert.match(appSource, /fetch\(`\$\{apiBaseUrl\}\/alerts\$\{alertQueryString\(\)\}`/);
+  assert.match(appSource, /\/alerts\/\$\{encodeURIComponent\(detail\.alert\.alertId\)\}\/close/);
+  assert.match(appSource, /body: JSON\.stringify\(\{ version: detail\.alert\.version, closeReason \}\)/);
+  assert.match(appSource, /fetch\(`\$\{apiBaseUrl\}\/risk-rules\/default`/);
+  assert.match(appSource, /fetch\(`\$\{apiBaseUrl\}\/statistics`/);
+  assert.match(appSource, /fetch\(`\$\{apiBaseUrl\}\/audit-logs\$\{auditQueryString\(\)\}`/);
+  assert.match(appSource, /修改风险规则会影响后续新预警和新上报的风险判断，是否继续？/);
+  assert.match(appSource, /规则修改仅影响后续业务，不追溯修改已有记录。/);
+  for (const forbidden of ['selectedAlert\\.alert\\.sourceReference', 'selectedAlert\\.alert\\.wxOpenId', 'selectedAlert\\.alert\\.wxIdentityKey', 'selectedAudit\\.token']) {
+    assert.doesNotMatch(appSource, new RegExp(forbidden));
+  }
+});

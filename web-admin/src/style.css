@@ -623,6 +623,124 @@ dd {
   background: #fff0f0;
 }
 
+.filter-panel,
+.create-alert-panel {
+  margin-top: 0;
+  margin-bottom: 20px;
+}
+
+.filter-row,
+.risk-rule-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.alert-close-form {
+  display: grid;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.create-alert-panel h3,
+.panel-title {
+  margin: 0;
+  padding: 20px 24px;
+  color: #172033;
+  font-size: 17px;
+}
+
+.create-alert-panel .alert-form {
+  margin-top: 0;
+}
+
+.risk-rule-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.risk-rule-form fieldset {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+}
+
+.risk-rule-form legend {
+  padding: 0 6px;
+  color: #35425a;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-label input {
+  width: auto;
+  min-height: auto;
+}
+
+.statistics-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.statistics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.distribution-list {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+}
+
+.distribution-list div {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.distribution-list dd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.distribution-bar {
+  display: block;
+  flex: 1;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e6edf7;
+}
+
+.distribution-bar i {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: inherit;
+  background: #2d73df;
+}
+
+.compact-table {
+  min-width: 360px;
+}
+
+.audit-table {
+  min-width: 980px;
+}
+
 @media (max-width: 760px) {
   .admin-shell {
     grid-template-columns: 1fr;
@@ -658,11 +776,19 @@ dd {
 
   .metric-grid,
   .dashboard-grid,
-  .dashboard-bottom-grid {
+  .dashboard-bottom-grid,
+  .statistics-metrics,
+  .statistics-grid,
+  .filter-row,
+  .risk-rule-form {
     grid-template-columns: 1fr;
   }
 
   .summary-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .risk-rule-form fieldset {
+    grid-template-columns: 1fr;
   }
 }

@@ -957,7 +957,7 @@ test('29. 重复 dispatch 不会把 sent 重新写 sent', async () => {
   assert.equal(fixture.state.audits.length, 1);
 });
 
-test('30. /alerts OPTIONS 使用现有严格 CORS 逻辑', async () => {
+test('30. /alerts OPTIONS 同时声明新增列表读取与既有创建方法', async () => {
   const fixture = await createFixture();
   const response = await request(fixture.handler, {
     method: 'OPTIONS',
@@ -969,7 +969,7 @@ test('30. /alerts OPTIONS 使用现有严格 CORS 逻辑', async () => {
   assert.equal(response.body, '');
   assert.equal(response.headers['Access-Control-Allow-Origin'], ALLOWED_ORIGIN);
   assert.equal(response.headers['Access-Control-Allow-Headers'], 'Authorization, Content-Type');
-  assert.equal(response.headers['Access-Control-Allow-Methods'], 'POST, OPTIONS');
+  assert.equal(response.headers['Access-Control-Allow-Methods'], 'GET, POST, OPTIONS');
 });
 
 test('31. /alerts/:alertId/dispatch OPTIONS 使用现有严格 CORS 逻辑', async () => {

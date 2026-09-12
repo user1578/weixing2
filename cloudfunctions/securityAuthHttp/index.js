@@ -12,6 +12,16 @@ const TOKEN_CLAIM_KEYS = ['exp', 'iat', 'jti', 'role', 'sub'];
 const ALERT_CREATE_INPUT_KEYS = new Set(['studentNo', 'fraudType', 'content', 'sourceReference']);
 const ALERT_CREATE_REQUIRED_INPUT_KEYS = new Set(['studentNo', 'fraudType', 'content']);
 const ALERT_DISPATCH_INPUT_KEYS = new Set(['version']);
+const ALERT_CLOSE_INPUT_KEYS = new Set(['version', 'closeReason']);
+const RISK_RULE_UPDATE_INPUT_KEYS = new Set([
+  'highAmount',
+  'midAmountMin',
+  'repeatAlertWindowDays',
+  'highAlertRepeatCount',
+  'midAlertRepeatCount',
+  'keyFraudTypes',
+  'version',
+]);
 const REPORT_START_PROCESS_INPUT_KEYS = new Set(['version', 'actionContent']);
 const REPORT_CLOSE_INPUT_KEYS = new Set([
   'version',
@@ -53,6 +63,14 @@ const ALLOWED_FRAUD_TYPES = new Set([
   'other',
 ]);
 const ACTIVE_ALERT_STATUSES = ['sent', 'viewed', 'following_up'];
+const ALERT_STATUSES = new Set(['pending_dispatch', ...ACTIVE_ALERT_STATUSES, 'closed']);
+const ALERT_CLOSE_SOURCE_STATUSES = new Set(ACTIVE_ALERT_STATUSES);
+const RISK_RULE_KEY_FRAUD_TYPES = new Set([
+  'part_time_scam',
+  'impersonate_public',
+  'fake_loan',
+  'fake_refund',
+]);
 const MAX_STUDENT_NO_LENGTH = 64;
 const MAX_ALERT_CONTENT_LENGTH = 1000;
 const MAX_SOURCE_REFERENCE_LENGTH = 128;
@@ -69,6 +87,10 @@ const MAX_COLLEGE_ID_LENGTH = 64;
 const MAX_COLLEGE_NAME_LENGTH = 64;
 const DASHBOARD_LIST_READ_LIMIT = 100;
 const DASHBOARD_COLLEGE_READ_LIMIT = 500;
+const ALERT_LIST_LIMIT = 100;
+const AUDIT_LOG_LIST_LIMIT = 200;
+const STATISTICS_COLLEGE_READ_LIMIT = 500;
+const MAX_AUDIT_FILTER_LENGTH = 128;
 
 const ERROR_MESSAGES = {
   INVALID_INPUT: '请求内容无效',
@@ -193,6 +215,48 @@ function parseAlertDispatchBody(body) {
     return null;
   }
   return { version: parsed.version };
+}
+
+function parseAlertCloseBody(body) {
+  const parsed = parseJsonObjectBody(body);
+  if (!parsed || !hasOnlyAllowedKeys(parsed, ALERT_CLOSE_INPUT_KEYS, ALERT_CLOSE_INPUT_KEYS) ||
+    !Number.isSafeInteger(parsed.version) || parsed.version <= 0) {
+    return null;
+  }
+  const closeReason = normalizeRequiredString(parsed.closeReason, MAX_CLOSE_REASON_LENGTH);
+  return closeReason ? { version: parsed.version, closeReason } : null;
+}
+
+function normalizeRiskRuleFields(value) {
+  if (!isPlainObject(value) || typeof value.highAmount !== 'number' || !Number.isFinite(value.highAmount) ||
+    typeof value.midAmountMin !== 'number' || !Number.isFinite(value.midAmountMin) ||
+    value.midAmountMin < 0 || value.highAmount <= value.midAmountMin ||
+    !Number.isSafeInteger(value.repeatAlertWindowDays) || value.repeatAlertWindowDays < 1 || value.repeatAlertWindowDays > 365 ||
+    !Number.isSafeInteger(value.highAlertRepeatCount) || value.highAlertRepeatCount < 1 || value.highAlertRepeatCount > 100 ||
+    !Number.isSafeInteger(value.midAlertRepeatCount) || value.midAlertRepeatCount < 1 || value.midAlertRepeatCount > 100 ||
+    !Array.isArray(value.keyFraudTypes) || value.keyFraudTypes.length === 0 ||
+    value.keyFraudTypes.some((fraudType) => typeof fraudType !== 'string' || !RISK_RULE_KEY_FRAUD_TYPES.has(fraudType)) ||
+    new Set(value.keyFraudTypes).size !== value.keyFraudTypes.length) {
+    return null;
+  }
+  return {
+    highAmount: value.highAmount,
+    midAmountMin: value.midAmountMin,
+    repeatAlertWindowDays: value.repeatAlertWindowDays,
+    highAlertRepeatCount: value.highAlertRepeatCount,
+    midAlertRepeatCount: value.midAlertRepeatCount,
+    keyFraudTypes: [...value.keyFraudTypes],
+  };
+}
+
+function parseRiskRuleUpdateBody(body) {
+  const parsed = parseJsonObjectBody(body);
+  if (!parsed || !hasOnlyAllowedKeys(parsed, RISK_RULE_UPDATE_INPUT_KEYS, RISK_RULE_UPDATE_INPUT_KEYS) ||
+    !Number.isSafeInteger(parsed.version) || parsed.version < 0) {
+    return null;
+  }
+  const fields = normalizeRiskRuleFields(parsed);
+  return fields ? { ...fields, version: parsed.version } : null;
 }
 
 function parseReportStartProcessBody(body) {
@@ -728,6 +792,174 @@ function createAlertDispatchAudit({ alertId, actorId, requestId, serverDate, cre
   };
 }
 
+function createAlertSensitiveViewAudit({ alertId, actorId, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'alert.view_sensitive',
+    resourceType: 'alert',
+    resourceId: alertId,
+    result: 'success',
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
+function createAlertCloseAudit({ alertId, actorId, beforeStatus, requestId, serverDate, createAuditId }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'alert.close',
+    resourceType: 'alert',
+    resourceId: alertId,
+    result: 'success',
+    beforeSummary: { status: beforeStatus },
+    afterSummary: { status: 'closed' },
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
+function alertListItem(alert, collegeNames) {
+  return {
+    alertId: alert._id,
+    fraudType: alert.fraudType,
+    riskLevel: alert.riskLevel,
+    status: alert.status,
+    collegeName: collegeNames.get(alert.collegeId) || '',
+    createdAt: alert.createdAt,
+    version: alert.version,
+  };
+}
+
+function alertDetailProjection(alert, collegeName) {
+  return {
+    alertId: alert._id,
+    fraudType: alert.fraudType,
+    riskLevel: alert.riskLevel,
+    riskReasons: Array.isArray(alert.riskReasons) ? [...alert.riskReasons] : [],
+    status: alert.status,
+    content: alert.content,
+    collegeName,
+    createdAt: alert.createdAt,
+    sentAt: alert.issuedAt ?? null,
+    viewedAt: alert.viewedAt ?? null,
+    closedAt: alert.closedAt ?? null,
+    version: alert.version,
+  };
+}
+
+function studentAlertDetailProjection(student) {
+  if (!student || student.role !== 'student') return null;
+  const studentNo = typeof student.studentNo === 'string' && student.studentNo.trim()
+    ? student.studentNo.trim()
+    : (typeof student.identityKey === 'string' && student.identityKey.startsWith('student:')
+      ? student.identityKey.slice('student:'.length) : '');
+  return typeof student.name === 'string' && student.name.trim() && studentNo
+    ? { name: student.name.trim(), studentNo }
+    : null;
+}
+
+function riskRuleVersion(rule) {
+  return Number.isSafeInteger(rule && rule.version) && rule.version > 0 ? rule.version : 0;
+}
+
+function riskRuleProjection(rule) {
+  const fields = normalizeRiskRuleFields(rule);
+  if (!fields) return null;
+  return { ...fields, version: riskRuleVersion(rule) };
+}
+
+function createRiskRuleUpdateAudit({ actorId, requestId, serverDate, createAuditId, before, after }) {
+  return {
+    _id: createAuditId(),
+    actorId,
+    actorRole: 'security',
+    actorCollegeId: null,
+    action: 'risk_rule.update',
+    resourceType: 'risk_rule',
+    resourceId: 'rule_default',
+    result: 'success',
+    beforeSummary: before,
+    afterSummary: after,
+    requestId,
+    createdAt: serverDate(),
+  };
+}
+
+function shanghaiDateKey(dayStart) {
+  const shifted = new Date(dayStart.getTime() + (8 * 60 * 60 * 1000));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`;
+}
+
+function normalizeOptionalAuditFilter(value, allowedValues = null) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  if (!normalized || normalized.length > MAX_AUDIT_FILTER_LENGTH || !/^[a-z0-9_.-]+$/i.test(normalized)) return null;
+  if (allowedValues && !allowedValues.has(normalized)) return null;
+  return normalized;
+}
+
+function parseAlertListFilters(query) {
+  if (!isPlainObject(query) || !hasOnlyAllowedKeys(query, new Set(['status', 'riskLevel', 'fraudType']))) return null;
+  const status = query.status === undefined ? undefined : normalizeOptionalAuditFilter(query.status, ALERT_STATUSES);
+  const riskLevel = query.riskLevel === undefined ? undefined : normalizeOptionalAuditFilter(query.riskLevel, new Set(['low', 'medium', 'high']));
+  const fraudType = query.fraudType === undefined ? undefined : normalizeOptionalAuditFilter(query.fraudType, ALLOWED_FRAUD_TYPES);
+  return status === null || riskLevel === null || fraudType === null ? null : { status, riskLevel, fraudType };
+}
+
+function parseAuditLogFilters(query) {
+  if (!isPlainObject(query) || !hasOnlyAllowedKeys(query, new Set(['action', 'resourceType', 'result']))) return null;
+  const action = normalizeOptionalAuditFilter(query.action);
+  const resourceType = normalizeOptionalAuditFilter(query.resourceType);
+  const result = normalizeOptionalAuditFilter(query.result, new Set(['success', 'failure']));
+  return action === null || resourceType === null || result === null ? null : { action, resourceType, result };
+}
+
+const AUDIT_SUMMARY_FIELDS = new Set([
+  'status', 'riskLevel', 'role', 'collegeId', 'bindStatus', 'activeRole', 'verificationResult', 'finalOutcome',
+  'highAmount', 'midAmountMin', 'repeatAlertWindowDays', 'highAlertRepeatCount', 'midAlertRepeatCount', 'keyFraudTypes',
+]);
+
+function auditSummaryProjection(summary) {
+  if (!isPlainObject(summary)) return undefined;
+  const projected = {};
+  for (const [key, value] of Object.entries(summary)) {
+    if (!AUDIT_SUMMARY_FIELDS.has(key)) continue;
+    if (typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) {
+      projected[key] = value;
+    } else if (key === 'keyFraudTypes' && Array.isArray(value) && value.every((item) => typeof item === 'string' && RISK_RULE_KEY_FRAUD_TYPES.has(item))) {
+      projected[key] = [...value];
+    }
+  }
+  return projected;
+}
+
+function auditLogProjection(audit) {
+  const item = {
+    auditId: audit._id,
+    actorId: audit.actorId,
+    actorRole: audit.actorRole,
+    action: audit.action,
+    resourceType: audit.resourceType,
+    resourceId: audit.resourceId,
+    result: audit.result,
+    failureReason: audit.failureReason ?? null,
+    requestId: audit.requestId,
+    createdAt: audit.createdAt,
+  };
+  const beforeSummary = auditSummaryProjection(audit.beforeSummary);
+  const afterSummary = auditSummaryProjection(audit.afterSummary);
+  if (beforeSummary !== undefined) item.beforeSummary = beforeSummary;
+  if (afterSummary !== undefined) item.afterSummary = afterSummary;
+  return item;
+}
+
 function createReportStartProcessAudit({ reportId, actorId, requestId, serverDate, createAuditId }) {
   return {
     _id: createAuditId(),
@@ -1155,7 +1387,113 @@ function createSecurityAlertService({
     }
   }
 
-  return { create, dispatch };
+  async function list(authorization, query) {
+    const requestId = createRequestId();
+    if (!dependenciesReady) return internalFailure(requestId, 'securityAlertListConfiguration');
+    const authenticated = await authenticate(authorization, requestId, 'securityAlertListAuthentication');
+    if (!authenticated.ok) return authenticated.result;
+    const filters = parseAlertListFilters(query);
+    if (!filters) return failure('INVALID_INPUT');
+    try {
+      const [alertsResult, collegesResult] = await Promise.all([
+        db.collection('alerts').orderBy('createdAt', 'desc').limit(ALERT_LIST_LIMIT).get(),
+        db.collection('colleges').limit(DASHBOARD_COLLEGE_READ_LIMIT).get(),
+      ]);
+      ensureDatabaseResult(alertsResult);
+      ensureDatabaseResult(collegesResult);
+      const collegeNames = new Map((Array.isArray(collegesResult.data) ? collegesResult.data : [])
+        .filter((college) => college && typeof college._id === 'string' && typeof college.name === 'string' && college.name.trim())
+        .map((college) => [college._id, college.name.trim()]));
+      const alerts = (Array.isArray(alertsResult.data) ? alertsResult.data : [])
+        .filter((alert) => alert && ALERT_STATUSES.has(alert.status) &&
+          (filters.status === undefined || alert.status === filters.status) &&
+          (filters.riskLevel === undefined || alert.riskLevel === filters.riskLevel) &&
+          (filters.fraudType === undefined || alert.fraudType === filters.fraudType))
+        .sort((left, right) => dateValue(right.createdAt) - dateValue(left.createdAt))
+        .slice(0, ALERT_LIST_LIMIT)
+        .map((alert) => alertListItem(alert, collegeNames));
+      return success('ALERTS_LOADED', { alerts });
+    } catch (error) {
+      return internalFailure(requestId, 'securityAlertListRead');
+    }
+  }
+
+  async function detail(authorization, alertId) {
+    const requestId = createRequestId();
+    if (!dependenciesReady) return internalFailure(requestId, 'securityAlertDetailConfiguration', alertId || null);
+    const authenticated = await authenticate(authorization, requestId, 'securityAlertDetailAuthentication');
+    if (!authenticated.ok) return authenticated.result;
+    if (typeof alertId !== 'string' || !alertId || alertId.length > 128) return failure('INVALID_INPUT');
+    try {
+      const alert = await findRecordById(db, 'alerts', alertId);
+      if (!alert) return failure('NOT_FOUND');
+      const [college, student] = await Promise.all([
+        typeof alert.collegeId === 'string' && alert.collegeId ? findRecordById(db, 'colleges', alert.collegeId) : null,
+        typeof alert.studentId === 'string' && alert.studentId ? findRecordById(db, 'users', alert.studentId) : null,
+      ]);
+      ensureSuccessfulInsert(await db.collection('audit_logs').add(createAlertSensitiveViewAudit({
+        alertId: alert._id,
+        actorId: authenticated.user._id,
+        requestId,
+        serverDate,
+        createAuditId,
+      })));
+      const payload = {
+        alert: alertDetailProjection(alert, college && typeof college.name === 'string' ? college.name.trim() : ''),
+      };
+      const studentProjection = studentAlertDetailProjection(student);
+      if (studentProjection) payload.student = studentProjection;
+      return success('ALERT_DETAIL_LOADED', payload);
+    } catch (error) {
+      return internalFailure(requestId, 'securityAlertDetailRead', alertId);
+    }
+  }
+
+  async function close(authorization, alertId, body) {
+    const requestId = createRequestId();
+    if (!dependenciesReady) return internalFailure(requestId, 'securityAlertCloseConfiguration', alertId || null);
+    const authenticated = await authenticate(authorization, requestId, 'securityAlertCloseAuthentication');
+    if (!authenticated.ok) return authenticated.result;
+    const input = parseAlertCloseBody(body);
+    if (!input || typeof alertId !== 'string' || !alertId || alertId.length > 128) return failure('INVALID_INPUT');
+    const auditId = createAuditId();
+    try {
+      const alert = await db.runTransaction(async (transaction) => {
+        const currentAlert = await findRecordById(transaction, 'alerts', alertId);
+        if (!currentAlert) throw businessError('NOT_FOUND');
+        if (!ALERT_CLOSE_SOURCE_STATUSES.has(currentAlert.status) || currentAlert.version !== input.version) {
+          throw businessError('CONFLICT');
+        }
+        const updateResult = ensureDatabaseResult(await transaction.collection('alerts').where({
+          _id: currentAlert._id,
+          status: currentAlert.status,
+          version: input.version,
+        }).update({
+          status: 'closed',
+          closedAt: serverDate(),
+          updatedAt: serverDate(),
+          version: input.version + 1,
+        }));
+        if (updatedCount(updateResult) !== 1) throw businessError('CONFLICT');
+        ensureSuccessfulInsert(await transaction.collection('audit_logs').add(createAlertCloseAudit({
+          alertId: currentAlert._id,
+          actorId: authenticated.user._id,
+          beforeStatus: currentAlert.status,
+          requestId,
+          serverDate,
+          createAuditId: () => auditId,
+        })));
+        return { alertId: currentAlert._id, status: 'closed', version: input.version + 1 };
+      });
+      return success('ALERT_CLOSED', { alert });
+    } catch (error) {
+      if (error && error.isBusinessError) return failure(error.businessCode);
+      if (isTransactionConflict(error)) return failure('CONFLICT');
+      return internalFailure(requestId, 'securityAlertCloseTransaction', alertId);
+    }
+  }
+
+  return { create, dispatch, list, detail, close };
 }
 
 function createSecurityReportProcessingService({
@@ -2015,6 +2353,228 @@ function createSecurityCollegeManagementService({
   return { list, create, updateStatus };
 }
 
+function createSecurityRiskRuleManagementService({
+  authService,
+  db,
+  serverDate,
+  createAuditId = () => `audit_${crypto.randomUUID().replace(/-/g, '')}`,
+  createRequestId = () => crypto.randomUUID(),
+  logger = console,
+  configured = true,
+} = {}) {
+  const dependenciesReady = configured && authService && typeof authService.authenticateSecuritySession === 'function' &&
+    db && typeof db.collection === 'function' && typeof db.runTransaction === 'function' && typeof serverDate === 'function';
+  const internalFailure = (requestId, stage) => {
+    safeLog(logger, { requestId, code: 'INTERNAL_ERROR', resourceId: 'rule_default', stage });
+    return failure('INTERNAL_ERROR');
+  };
+  async function authenticate(authorization, requestId, stage) {
+    try { return await authService.authenticateSecuritySession(authorization); }
+    catch (error) { return { ok: false, result: internalFailure(requestId, stage) }; }
+  }
+
+  async function load(authorization) {
+    const requestId = createRequestId();
+    if (!dependenciesReady) return internalFailure(requestId, 'securityRiskRuleGetConfiguration');
+    const authenticated = await authenticate(authorization, requestId, 'securityRiskRuleGetAuthentication');
+    if (!authenticated.ok) return authenticated.result;
+    try {
+      const rule = await findRecordById(db, 'risk_rules', 'rule_default');
+      const projection = riskRuleProjection(rule);
+      return projection ? success('RISK_RULE_LOADED', { rule: projection }) : internalFailure(requestId, 'securityRiskRuleGetRead');
+    } catch (error) {
+      return internalFailure(requestId, 'securityRiskRuleGetRead');
+    }
+  }
+
+  async function update(authorization, body) {
+    const requestId = createRequestId();
+    if (!dependenciesReady) return internalFailure(requestId, 'securityRiskRuleUpdateConfiguration');
+    const authenticated = await authenticate(authorization, requestId, 'securityRiskRuleUpdateAuthentication');
+    if (!authenticated.ok) return authenticated.result;
+    const input = parseRiskRuleUpdateBody(body);
+    if (!input) return failure('INVALID_INPUT');
+    const auditId = createAuditId();
+    try {
+      const rule = await db.runTransaction(async (transaction) => {
+        const currentRule = await findRecordById(transaction, 'risk_rules', 'rule_default');
+        const before = riskRuleProjection(currentRule);
+        if (!before || input.version !== before.version) throw businessError('CONFLICT');
+        const condition = { _id: 'rule_default' };
+        if (before.version > 0) condition.version = before.version;
+        const after = { ...normalizeRiskRuleFields(input), version: before.version + 1 };
+        const updateResult = ensureDatabaseResult(await transaction.collection('risk_rules').where(condition).update({
+          ...normalizeRiskRuleFields(input),
+          version: after.version,
+          updatedAt: serverDate(),
+        }));
+        if (updatedCount(updateResult) !== 1) throw businessError('CONFLICT');
+        ensureSuccessfulInsert(await transaction.collection('audit_logs').add(createRiskRuleUpdateAudit({
+          actorId: authenticated.user._id,
+          requestId,
+          serverDate,
+          createAuditId: () => auditId,
+          before: normalizeRiskRuleFields(before),
+          after: normalizeRiskRuleFields(after),
+        })));
+        return after;
+      });
+      return success('RISK_RULE_UPDATED', { rule });
+    } catch (error) {
+      if (error && error.isBusinessError) return failure(error.businessCode);
+      if (isTransactionConflict(error)) return failure('CONFLICT');
+      return internalFailure(requestId, 'securityRiskRuleUpdateTransaction');
+    }
+  }
+
+  return { load, update };
+}
+
+function createSecurityStatisticsService({
+  authService,
+  db,
+  now = () => new Date(),
+  createRequestId = () => crypto.randomUUID(),
+  logger = console,
+  configured = true,
+} = {}) {
+  const dependenciesReady = configured && authService && typeof authService.authenticateSecuritySession === 'function' &&
+    db && typeof db.collection === 'function' && db.command && typeof db.command.in === 'function' && typeof db.command.gte === 'function';
+  const internalFailure = (requestId, stage) => {
+    safeLog(logger, { requestId, code: 'INTERNAL_ERROR', resourceId: null, stage });
+    return failure('INTERNAL_ERROR');
+  };
+  async function authenticate(authorization, requestId) {
+    try { return await authService.authenticateSecuritySession(authorization); }
+    catch (error) { return { ok: false, result: internalFailure(requestId, 'securityStatisticsAuthentication') }; }
+  }
+  async function count(collectionName, query) {
+    const collection = db.collection(collectionName);
+    const result = query ? await collection.where(query).count() : await collection.count();
+    const total = countTotal(result);
+    if (total === null) throw new Error('Invalid aggregate count');
+    return total;
+  }
+
+  async function load(authorization) {
+    const requestId = createRequestId();
+    if (!dependenciesReady) return internalFailure(requestId, 'securityStatisticsConfiguration');
+    const authenticated = await authenticate(authorization, requestId);
+    if (!authenticated.ok) return authenticated.result;
+    let currentTime;
+    try {
+      currentTime = now();
+      if (!(currentTime instanceof Date) || Number.isNaN(currentTime.getTime())) throw new Error('Invalid clock');
+    } catch (error) {
+      return internalFailure(requestId, 'securityStatisticsClock');
+    }
+    try {
+      const reportFraudTypes = ['part_time_scam', 'impersonate_public', 'fake_loan', 'fake_refund', 'other'];
+      const reportRiskLevels = ['low', 'medium', 'high'];
+      const todayStart = shanghaiDayStart(currentTime);
+      const dayStarts = Array.from({ length: 8 }, (_, index) => new Date(todayStart.getTime() - ((6 - index) * 24 * 60 * 60 * 1000)));
+      const [totalReports, pendingCounselor, pendingSecurity, inProcess, closed, totalAlerts, activeAlerts, studentCount, counselorCount,
+        ...remaining] = await Promise.all([
+        count('fraud_reports'),
+        count('fraud_reports', { status: 'pending_counselor_verify' }),
+        count('fraud_reports', { status: 'pending_security_verify' }),
+        count('fraud_reports', { status: 'in_process' }),
+        count('fraud_reports', { status: 'closed' }),
+        count('alerts'),
+        count('alerts', { status: db.command.in(ACTIVE_ALERT_STATUSES) }),
+        count('users', { role: 'student' }),
+        count('users', { role: 'counselor' }),
+        ...reportRiskLevels.map((riskLevel) => count('fraud_reports', { riskLevel })),
+        ...reportFraudTypes.map((fraudType) => count('fraud_reports', { fraudType })),
+        ...dayStarts.map((start) => count('fraud_reports', { createdAt: db.command.gte(start) })),
+        db.collection('colleges').limit(STATISTICS_COLLEGE_READ_LIMIT).get(),
+      ]);
+      const riskCounts = remaining.slice(0, reportRiskLevels.length);
+      const fraudCounts = remaining.slice(reportRiskLevels.length, reportRiskLevels.length + reportFraudTypes.length);
+      const dailyCumulativeCounts = remaining.slice(reportRiskLevels.length + reportFraudTypes.length, -1);
+      const collegesResult = remaining.at(-1);
+      ensureDatabaseResult(collegesResult);
+      const colleges = (Array.isArray(collegesResult.data) ? collegesResult.data : [])
+        .filter((college) => college && typeof college._id === 'string' && college._id && typeof college.name === 'string' && college.name.trim());
+      const collegeCounts = await Promise.all(colleges.flatMap((college) => [
+        count('fraud_reports', { collegeId: college._id }),
+        count('alerts', { collegeId: college._id }),
+      ]));
+      const reportByCollege = colleges.map((college, index) => ({
+        collegeId: college._id,
+        collegeName: college.name.trim(),
+        reportCount: collegeCounts[index * 2],
+      })).sort((left, right) => right.reportCount - left.reportCount || left.collegeName.localeCompare(right.collegeName));
+      const alertByCollege = colleges.map((college, index) => ({
+        collegeId: college._id,
+        collegeName: college.name.trim(),
+        alertCount: collegeCounts[(index * 2) + 1],
+      })).sort((left, right) => right.alertCount - left.alertCount || left.collegeName.localeCompare(right.collegeName));
+      const dailyReports = dayStarts.slice(0, 7).map((start, index) => ({
+        date: shanghaiDateKey(start),
+        count: Math.max(0, dailyCumulativeCounts[index] - dailyCumulativeCounts[index + 1]),
+      }));
+      return success('STATISTICS_LOADED', {
+        overview: { totalReports, pendingCounselor, pendingSecurity, inProcess, closed, totalAlerts, activeAlerts, studentCount, counselorCount },
+        riskDistribution: Object.fromEntries(reportRiskLevels.map((riskLevel, index) => [riskLevel, riskCounts[index]])),
+        reportByFraudType: Object.fromEntries(reportFraudTypes.map((fraudType, index) => [fraudType, fraudCounts[index]])),
+        reportByCollege,
+        alertByCollege,
+        dailyReports,
+      });
+    } catch (error) {
+      return internalFailure(requestId, 'securityStatisticsRead');
+    }
+  }
+
+  return { load };
+}
+
+function createSecurityAuditLogService({
+  authService,
+  db,
+  createRequestId = () => crypto.randomUUID(),
+  logger = console,
+  configured = true,
+} = {}) {
+  const dependenciesReady = configured && authService && typeof authService.authenticateSecuritySession === 'function' &&
+    db && typeof db.collection === 'function';
+  const internalFailure = (requestId, stage) => {
+    safeLog(logger, { requestId, code: 'INTERNAL_ERROR', resourceId: null, stage });
+    return failure('INTERNAL_ERROR');
+  };
+  async function authenticate(authorization, requestId) {
+    try { return await authService.authenticateSecuritySession(authorization); }
+    catch (error) { return { ok: false, result: internalFailure(requestId, 'securityAuditLogAuthentication') }; }
+  }
+
+  async function list(authorization, query) {
+    const requestId = createRequestId();
+    if (!dependenciesReady) return internalFailure(requestId, 'securityAuditLogConfiguration');
+    const authenticated = await authenticate(authorization, requestId);
+    if (!authenticated.ok) return authenticated.result;
+    const filters = parseAuditLogFilters(query);
+    if (!filters) return failure('INVALID_INPUT');
+    try {
+      const result = await db.collection('audit_logs').orderBy('createdAt', 'desc').limit(AUDIT_LOG_LIST_LIMIT).get();
+      ensureDatabaseResult(result);
+      const logs = (Array.isArray(result.data) ? result.data : [])
+        .filter((audit) => audit &&
+          (filters.action === undefined || audit.action === filters.action) &&
+          (filters.resourceType === undefined || audit.resourceType === filters.resourceType) &&
+          (filters.result === undefined || audit.result === filters.result))
+        .sort((left, right) => dateValue(right.createdAt) - dateValue(left.createdAt))
+        .slice(0, AUDIT_LOG_LIST_LIMIT)
+        .map(auditLogProjection);
+      return success('AUDIT_LOGS_LOADED', { logs });
+    } catch (error) {
+      return internalFailure(requestId, 'securityAuditLogRead');
+    }
+  }
+
+  return { list };
+}
+
 function createSecurityDashboardService({
   authService,
   db,
@@ -2143,6 +2703,24 @@ function getHttpPath(event) {
   return normalizePath(event && (event.path || event.rawPath || (event.requestContext && event.requestContext.http && event.requestContext.http.path)));
 }
 
+function getHttpQuery(event) {
+  const query = {};
+  const rawPath = event && (event.rawPath || event.path || (event.requestContext && event.requestContext.http && event.requestContext.http.path));
+  if (typeof rawPath === 'string' && rawPath.includes('?')) {
+    const parameters = new URLSearchParams(rawPath.slice(rawPath.indexOf('?') + 1));
+    for (const [key, value] of parameters.entries()) {
+      query[key] = Object.hasOwn(query, key) ? null : value;
+    }
+  }
+  const provided = event && event.queryStringParameters;
+  if (provided && typeof provided === 'object' && !Array.isArray(provided)) {
+    for (const [key, value] of Object.entries(provided)) {
+      query[key] = Object.hasOwn(query, key) && query[key] !== value ? null : value;
+    }
+  }
+  return query;
+}
+
 function parseAllowedOrigins(value) {
   const origins = new Set([LOCAL_DEVELOPMENT_ORIGIN]);
   if (typeof value === 'string') {
@@ -2204,6 +2782,16 @@ function getAlertDispatchId(path) {
   return match ? match[1] : null;
 }
 
+function getAlertDetailId(path) {
+  const match = /^\/alerts\/([^/]+)$/.exec(path);
+  return match ? match[1] : null;
+}
+
+function getAlertCloseId(path) {
+  const match = /^\/alerts\/([^/]+)\/close$/.exec(path);
+  return match ? match[1] : null;
+}
+
 function getReportStartProcessId(path) {
   const match = /^\/reports\/([^/]+)\/start-process$/.exec(path);
   return match ? match[1] : null;
@@ -2248,6 +2836,9 @@ function createHttpHandler({
   identityManagementService = null,
   collegeManagementService = null,
   dashboardService = null,
+  riskRuleManagementService = null,
+  statisticsService = null,
+  auditLogService = null,
   allowedOrigins,
   logger = console,
 }) {
@@ -2265,6 +2856,8 @@ function createHttpHandler({
       const collegeStatusId = getCollegeStatusId(path);
       const reportDetailId = getReportDetailId(path);
       const reportReturnId = getReportReturnId(path);
+      const alertDetailId = getAlertDetailId(path);
+      const alertCloseId = getAlertCloseId(path);
       const allowedMethods = path === '/login'
         ? 'POST, OPTIONS'
         : path === '/session'
@@ -2273,13 +2866,19 @@ function createHttpHandler({
             ? 'GET, POST, OPTIONS'
             : path === '/colleges'
               ? 'GET, POST, OPTIONS'
+              : path === '/risk-rules/default'
+                ? 'GET, POST, OPTIONS'
+                : path === '/statistics' || path === '/audit-logs'
+                  ? 'GET, OPTIONS'
               : (path === '/dashboard')
                 ? 'GET, OPTIONS'
                 : (path === '/reports' || reportDetailId)
                   ? 'GET, OPTIONS'
-            : (identityUnbindUserId || identityStatusUserId || collegeStatusId || reportReturnId || path === '/alerts' || getAlertDispatchId(path) || getReportStartProcessId(path) || getReportCloseId(path))
-            ? 'POST, OPTIONS'
-            : null;
+                  : (path === '/alerts' || alertDetailId)
+                    ? 'GET, POST, OPTIONS'
+                    : (identityUnbindUserId || identityStatusUserId || collegeStatusId || reportReturnId || alertCloseId || getAlertDispatchId(path) || getReportStartProcessId(path) || getReportCloseId(path))
+                      ? 'POST, OPTIONS'
+                      : null;
       if (!allowedMethods) {
         return httpResponse(failure('NOT_FOUND'), buildResponseHeaders(origin, originWhitelist));
       }
@@ -2303,6 +2902,38 @@ function createHttpHandler({
         }
         return httpResponse(await dashboardService.load(
           readHeader(event && event.headers, 'authorization'),
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      if (method === 'GET' && path === '/statistics') {
+        if (!statisticsService || typeof statisticsService.load !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await statisticsService.load(
+          readHeader(event && event.headers, 'authorization'),
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      if (method === 'GET' && path === '/audit-logs') {
+        if (!auditLogService || typeof auditLogService.list !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await auditLogService.list(
+          readHeader(event && event.headers, 'authorization'), getHttpQuery(event),
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      if (method === 'GET' && path === '/risk-rules/default') {
+        if (!riskRuleManagementService || typeof riskRuleManagementService.load !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await riskRuleManagementService.load(
+          readHeader(event && event.headers, 'authorization'),
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      if (method === 'POST' && path === '/risk-rules/default') {
+        if (!riskRuleManagementService || typeof riskRuleManagementService.update !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await riskRuleManagementService.update(
+          readHeader(event && event.headers, 'authorization'), event && event.body,
         ), buildResponseHeaders(origin, originWhitelist));
       }
       if (method === 'GET' && path === '/reports') {
@@ -2398,6 +3029,23 @@ function createHttpHandler({
           event && event.body,
         ), buildResponseHeaders(origin, originWhitelist));
       }
+      if (method === 'GET' && path === '/alerts') {
+        if (!alertService || typeof alertService.list !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await alertService.list(
+          readHeader(event && event.headers, 'authorization'), getHttpQuery(event),
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      const alertDetailId = getAlertDetailId(path);
+      if (method === 'GET' && alertDetailId) {
+        if (!alertService || typeof alertService.detail !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await alertService.detail(
+          readHeader(event && event.headers, 'authorization'), alertDetailId,
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
       const alertId = getAlertDispatchId(path);
       if (method === 'POST' && alertId) {
         if (!alertService || typeof alertService.dispatch !== 'function') {
@@ -2407,6 +3055,15 @@ function createHttpHandler({
           readHeader(event && event.headers, 'authorization'),
           alertId,
           event && event.body,
+        ), buildResponseHeaders(origin, originWhitelist));
+      }
+      const alertCloseId = getAlertCloseId(path);
+      if (method === 'POST' && alertCloseId) {
+        if (!alertService || typeof alertService.close !== 'function') {
+          return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
+        }
+        return httpResponse(await alertService.close(
+          readHeader(event && event.headers, 'authorization'), alertCloseId, event && event.body,
         ), buildResponseHeaders(origin, originWhitelist));
       }
       const reportId = getReportStartProcessId(path);
@@ -2544,6 +3201,25 @@ function createDefaultHandler(options = {}) {
       logger,
       configured: dependencies.configured,
     });
+    const riskRuleManagementService = createSecurityRiskRuleManagementService({
+      authService,
+      db: dependencies.db,
+      serverDate: dependencies.serverDate,
+      logger,
+      configured: dependencies.configured,
+    });
+    const statisticsService = createSecurityStatisticsService({
+      authService,
+      db: dependencies.db,
+      logger,
+      configured: dependencies.configured,
+    });
+    const auditLogService = createSecurityAuditLogService({
+      authService,
+      db: dependencies.db,
+      logger,
+      configured: dependencies.configured,
+    });
     const dashboardService = createSecurityDashboardService({
       authService,
       db: dependencies.db,
@@ -2559,6 +3235,9 @@ function createDefaultHandler(options = {}) {
       identityManagementService,
       collegeManagementService,
       dashboardService,
+      riskRuleManagementService,
+      statisticsService,
+      auditLogService,
       allowedOrigins: environment.SECURITY_WEB_ALLOWED_ORIGINS,
       logger,
     });
@@ -2592,7 +3271,7 @@ function createNodeServer(handler) {
       const body = request.method === 'POST' ? await readRequestBody(request) : undefined;
       result = await handler({
         httpMethod: request.method,
-        path: requestUrl.pathname,
+        path: `${requestUrl.pathname}${requestUrl.search}`,
         headers: request.headers,
         body,
       });
@@ -2632,17 +3311,25 @@ exports.__testables = {
   createDefaultHandler,
   createHttpHandler,
   createSecurityAlertService,
+  createSecurityAuditLogService,
   createSecurityCollegeManagementService,
   createSecurityDashboardService,
   createSecurityIdentityManagementService,
+  createSecurityRiskRuleManagementService,
   createSecurityReportClosingService,
   createSecurityReportManagementService,
   createSecurityReportProcessingService,
+  createSecurityStatisticsService,
   calculateManualAlertRisk,
   createLoginAudit,
   createReportCloseAudit,
   createReportStartProcessAudit,
+  createAlertCloseAudit,
+  createAlertSensitiveViewAudit,
+  createRiskRuleUpdateAudit,
   getAlertDispatchId,
+  getAlertCloseId,
+  getAlertDetailId,
   getCollegeStatusId,
   getIdentityStatusUserId,
   getIdentityUnbindUserId,
@@ -2654,7 +3341,10 @@ exports.__testables = {
   mintSessionToken,
   normalizeLoginName,
   parseAlertCreateBody,
+  parseAlertCloseBody,
   parseAlertDispatchBody,
+  parseAlertListFilters,
+  parseAuditLogFilters,
   parseCollegeCreateBody,
   parseCollegeStatusBody,
   parseIdentityCreateBody,
@@ -2663,10 +3353,12 @@ exports.__testables = {
   parseReportCloseBody,
   parseReportReturnBody,
   parseReportStartProcessBody,
+  parseRiskRuleUpdateBody,
   parseAllowedOrigins,
   parseLoginBody,
   collegeIdForName,
   shanghaiDayStart,
+  shanghaiDateKey,
   maskIdentityNo,
   verifySessionToken,
 };
