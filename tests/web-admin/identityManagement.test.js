@@ -81,8 +81,9 @@ test('8. 新增学院后进入身份管理并重新加载 active 学院下拉选
 });
 
 test('9. 工单管理加载真实三队列、敏感详情与受限状态操作', () => {
-  assert.match(appSource, /fetch\(`\$\{apiBaseUrl\}\/security\/reports`/);
-  assert.match(appSource, /security\/reports\/\$\{encodeURIComponent\(reportId\)\}/);
+  assert.match(appSource, /fetch\(`\$\{apiBaseUrl\}\/reports`/);
+  assert.match(appSource, /reports\/\$\{encodeURIComponent\(reportId\)\}/);
+  assert.doesNotMatch(appSource, /\$\{apiBaseUrl\}\/security\/reports/);
   assert.match(appSource, /REPORTS_LOADED/);
   assert.match(appSource, /REPORT_DETAIL_LOADED/);
   assert.match(appSource, /REPORT_RETURNED_TO_COUNSELOR/);

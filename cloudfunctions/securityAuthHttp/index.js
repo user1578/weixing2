@@ -2214,13 +2214,13 @@ function getReportCloseId(path) {
   return match ? match[1] : null;
 }
 
-function getSecurityReportId(path) {
-  const match = /^\/security\/reports\/([^/]+)$/.exec(path);
+function getReportDetailId(path) {
+  const match = /^\/reports\/([^/]+)$/.exec(path);
   return match ? match[1] : null;
 }
 
-function getSecurityReportReturnId(path) {
-  const match = /^\/security\/reports\/([^/]+)\/return$/.exec(path);
+function getReportReturnId(path) {
+  const match = /^\/reports\/([^/]+)\/return$/.exec(path);
   return match ? match[1] : null;
 }
 
@@ -2263,8 +2263,8 @@ function createHttpHandler({
       const identityUnbindUserId = getIdentityUnbindUserId(path);
       const identityStatusUserId = getIdentityStatusUserId(path);
       const collegeStatusId = getCollegeStatusId(path);
-      const securityReportId = getSecurityReportId(path);
-      const securityReportReturnId = getSecurityReportReturnId(path);
+      const reportDetailId = getReportDetailId(path);
+      const reportReturnId = getReportReturnId(path);
       const allowedMethods = path === '/login'
         ? 'POST, OPTIONS'
         : path === '/session'
@@ -2275,9 +2275,9 @@ function createHttpHandler({
               ? 'GET, POST, OPTIONS'
               : (path === '/dashboard')
                 ? 'GET, OPTIONS'
-                : (path === '/security/reports' || securityReportId)
+                : (path === '/reports' || reportDetailId)
                   ? 'GET, OPTIONS'
-            : (identityUnbindUserId || identityStatusUserId || collegeStatusId || securityReportReturnId || path === '/alerts' || getAlertDispatchId(path) || getReportStartProcessId(path) || getReportCloseId(path))
+            : (identityUnbindUserId || identityStatusUserId || collegeStatusId || reportReturnId || path === '/alerts' || getAlertDispatchId(path) || getReportStartProcessId(path) || getReportCloseId(path))
             ? 'POST, OPTIONS'
             : null;
       if (!allowedMethods) {
@@ -2305,7 +2305,7 @@ function createHttpHandler({
           readHeader(event && event.headers, 'authorization'),
         ), buildResponseHeaders(origin, originWhitelist));
       }
-      if (method === 'GET' && path === '/security/reports') {
+      if (method === 'GET' && path === '/reports') {
         if (!reportManagementService || typeof reportManagementService.list !== 'function') {
           return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
         }
@@ -2313,13 +2313,13 @@ function createHttpHandler({
           readHeader(event && event.headers, 'authorization'),
         ), buildResponseHeaders(origin, originWhitelist));
       }
-      const securityReportId = getSecurityReportId(path);
-      if (method === 'GET' && securityReportId) {
+      const reportDetailId = getReportDetailId(path);
+      if (method === 'GET' && reportDetailId) {
         if (!reportManagementService || typeof reportManagementService.detail !== 'function') {
           return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
         }
         return httpResponse(await reportManagementService.detail(
-          readHeader(event && event.headers, 'authorization'), securityReportId,
+          readHeader(event && event.headers, 'authorization'), reportDetailId,
         ), buildResponseHeaders(origin, originWhitelist));
       }
       if (method === 'GET' && path === '/colleges') {
@@ -2431,13 +2431,13 @@ function createHttpHandler({
           event && event.body,
         ), buildResponseHeaders(origin, originWhitelist));
       }
-      const securityReportReturnId = getSecurityReportReturnId(path);
-      if (method === 'POST' && securityReportReturnId) {
+      const reportReturnId = getReportReturnId(path);
+      if (method === 'POST' && reportReturnId) {
         if (!reportManagementService || typeof reportManagementService.returnToCounselor !== 'function') {
           return httpResponse(failure('INTERNAL_ERROR'), buildResponseHeaders(origin, originWhitelist));
         }
         return httpResponse(await reportManagementService.returnToCounselor(
-          readHeader(event && event.headers, 'authorization'), securityReportReturnId, event && event.body,
+          readHeader(event && event.headers, 'authorization'), reportReturnId, event && event.body,
         ), buildResponseHeaders(origin, originWhitelist));
       }
       return httpResponse(failure('NOT_FOUND'), buildResponseHeaders(origin, originWhitelist));
@@ -2647,8 +2647,8 @@ exports.__testables = {
   getIdentityStatusUserId,
   getIdentityUnbindUserId,
   getReportCloseId,
-  getSecurityReportId,
-  getSecurityReportReturnId,
+  getReportDetailId,
+  getReportReturnId,
   getReportStartProcessId,
   createNodeServer,
   mintSessionToken,

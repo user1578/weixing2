@@ -292,7 +292,7 @@ async function loadReports() {
   if (reportsLoading.value || !isAuthenticated.value || !requireApiBaseUrl()) return;
   reportsLoading.value = true;
   try {
-    const response = await fetch(`${apiBaseUrl}/security/reports`, { method: "GET", headers: { Authorization: `Bearer ${currentToken()}` } });
+    const response = await fetch(`${apiBaseUrl}/reports`, { method: "GET", headers: { Authorization: `Bearer ${currentToken()}` } });
     const payload = await readApiResponse(response);
     if (!isReportQueuesPayload(payload)) throw new ApiError("INTERNAL_ERROR");
     reportQueues.value = {
@@ -309,7 +309,7 @@ async function loadReportDetail(reportId) {
   if (!reportId || reportDetailLoading.value || !requireApiBaseUrl()) return;
   reportDetailLoading.value = true;
   try {
-    const response = await fetch(`${apiBaseUrl}/security/reports/${encodeURIComponent(reportId)}`, { method: "GET", headers: { Authorization: `Bearer ${currentToken()}` } });
+    const response = await fetch(`${apiBaseUrl}/reports/${encodeURIComponent(reportId)}`, { method: "GET", headers: { Authorization: `Bearer ${currentToken()}` } });
     const payload = await readApiResponse(response);
     if (!isReportDetailPayload(payload)) throw new ApiError("INTERNAL_ERROR");
     selectedReport.value = {
@@ -356,7 +356,7 @@ async function runReportAction() {
     body = { version: report.version, actionContent: form.actionContent.trim() };
   } else if (reportActionMode.value === "return") {
     if (!form.returnReason.trim() || form.returnReason.trim().length > 1000 || !form.actionContent.trim() || form.actionContent.trim().length > 2000) return setError("INVALID_INPUT");
-    path = `/security/reports/${encodeURIComponent(report.reportId)}/return`;
+    path = `/reports/${encodeURIComponent(report.reportId)}/return`;
     body = { version: report.version, verificationResult: form.verificationResult, returnReason: form.returnReason.trim(), actionContent: form.actionContent.trim() };
   } else if (reportActionMode.value === "close") {
     const confirmedLossAmount = Number(form.confirmedLossAmount);

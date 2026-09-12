@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const securityAuth = require('../../cloudfunctions/securityAuthHttp');
 
-const { createSecurityReportManagementService } = securityAuth.__testables;
+const { createHttpHandler, createSecurityReportManagementService } = securityAuth.__testables;
 const security = { _id: 'security_1', role: 'security', status: 'active', wxOpenId: null, bindStatus: 'not_applicable', name: '保卫处' };
 const counselor = { _id: 'counselor_1', role: 'counselor', status: 'active', collegeId: 'college_a' };
 const student = { _id: 'student_1', role: 'student', name: '学生甲', studentNo: '20260001', wxOpenId: 'secret-openid', wxIdentityKey: 'openid:secret-openid', passwordHash: 'never-return' };
@@ -72,4 +72,33 @@ test('原辅导员不可用时退回拒绝且事务回滚', async () => {
   assert.equal(fixture.state.reports[0].status, 'pending_security_verify');
   assert.equal(fixture.state.followups.length, 0);
   assert.equal(fixture.state.dispositions.length, 0);
+});
+
+test('HTTP 内部 reports 路由、CORS 及既有 start-process/close 路由保持精确匹配', async () => {
+  const calls = [];
+  const handler = createHttpHandler({
+    authService: { async login() { return { ok: true, code: 'AUTHENTICATED' }; }, async session() { return { ok: true, code: 'SESSION_VALID' }; } },
+    reportManagementService: {
+      async list(token) { calls.push(['list', token]); return { ok: true, code: 'REPORTS_LOADED', queues: {} }; },
+      async detail(token, reportId) { calls.push(['detail', token, reportId]); return { ok: true, code: 'REPORT_DETAIL_LOADED' }; },
+      async returnToCounselor(token, reportId, body) { calls.push(['return', token, reportId, body]); return { ok: true, code: 'REPORT_RETURNED_TO_COUNSELOR' }; },
+    },
+    reportProcessingService: { async startProcess(token, reportId) { calls.push(['start', token, reportId]); return { ok: true, code: 'REPORT_PROCESSING_STARTED' }; } },
+    reportClosingService: { async close(token, reportId) { calls.push(['close', token, reportId]); return { ok: true, code: 'REPORT_CLOSED' }; } },
+    allowedOrigins: 'https://security.example.edu', logger: { error() {} },
+  });
+  const request = (httpMethod, path, body) => handler({ httpMethod, path, body, headers: { origin: 'https://security.example.edu', authorization: 'Bearer token' } });
+  assert.equal(JSON.parse((await request('GET', '/reports')).body).code, 'REPORTS_LOADED');
+  assert.equal(JSON.parse((await request('GET', '/reports/report_1')).body).code, 'REPORT_DETAIL_LOADED');
+  assert.equal(JSON.parse((await request('POST', '/reports/report_1/return', '{"version":2}')).body).code, 'REPORT_RETURNED_TO_COUNSELOR');
+  assert.equal(JSON.parse((await request('POST', '/reports/report_1/start-process')).body).code, 'REPORT_PROCESSING_STARTED');
+  assert.equal(JSON.parse((await request('POST', '/reports/report_1/close')).body).code, 'REPORT_CLOSED');
+  for (const [path, methods] of [['/reports', 'GET, OPTIONS'], ['/reports/report_1', 'GET, OPTIONS'], ['/reports/report_1/return', 'POST, OPTIONS']]) {
+    const response = await request('OPTIONS', path);
+    assert.equal(response.statusCode, 204);
+    assert.equal(response.headers['Access-Control-Allow-Methods'], methods);
+  }
+  const legacy = await request('GET', '/security/reports');
+  assert.equal(legacy.statusCode, 404);
+  assert.deepEqual(calls.map(([name]) => name), ['list', 'detail', 'return', 'start', 'close']);
 });
