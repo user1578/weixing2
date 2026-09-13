@@ -84,13 +84,6 @@
             <view class="feature_text">持续学习常见诈骗防范知识</view>
           </button>
         </view>
-        <view class="feature_slot">
-          <button class="feature_card" bindtap="goToQuiz">
-            <view class="feature_top"><view class="feature_icon">自测</view></view>
-            <view class="feature_title">安全自测</view>
-            <view class="feature_text">完成单选题，检验防诈知识掌握情况</view>
-          </button>
-        </view>
       </view>
     </block>
 

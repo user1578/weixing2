@@ -31,37 +31,16 @@ const ARTICLE_SEEDS = Object.freeze([
   },
 ]);
 
-const QUESTION_SEEDS = Object.freeze([
-  { _id: 'qst_seed_001', fraudTags: ['part_time_scam'], stem: '陌生人邀请你做“先垫资、后返利”的刷单任务，最安全的做法是？', options: [['A', '先小额试一试'], ['B', '拒绝参与并核验信息'], ['C', '借钱完成高佣金任务'], ['D', '把验证码告诉对方']], correct: 'B', explanation: '正规兼职不会要求先垫资，先转账再返利是典型风险信号。' },
-  { _id: 'qst_seed_002', fraudTags: ['part_time_scam'], stem: '刷单群中有人晒出到账截图，应该如何判断？', options: [['A', '立即跟投'], ['B', '认为群友一定真实'], ['C', '警惕截图和群聊可能由骗子操控'], ['D', '把银行卡交给群主']], correct: 'C', explanation: '诈骗团伙可伪造到账截图和群聊气氛，不能据此判断安全。' },
-  { _id: 'qst_seed_003', fraudTags: ['impersonate_public'], stem: '“警方”来电称你涉嫌犯罪，要求转入安全账户，正确做法是？', options: [['A', '立即按要求转账'], ['B', '保持通话并共享屏幕'], ['C', '挂断后通过官方渠道独立核实'], ['D', '提供银行卡验证码']], correct: 'C', explanation: '公检法机关不会电话要求转账到所谓安全账户。' },
-  { _id: 'qst_seed_004', fraudTags: ['impersonate_public'], stem: '接到自称公检法人员的电话时，以下哪项绝不能提供？', options: [['A', '公开办事窗口地址'], ['B', '短信验证码'], ['C', '官方热线号码'], ['D', '学校值班电话']], correct: 'B', explanation: '验证码可用于登录或支付验证，任何机构都不会电话索要。' },
-  { _id: 'qst_seed_005', fraudTags: ['fake_loan'], stem: '贷款平台要求先支付“解冻费”才能放款，应当？', options: [['A', '立刻支付'], ['B', '分期支付'], ['C', '停止操作并通过正规渠道核验'], ['D', '向朋友借钱支付']], correct: 'C', explanation: '放款前收取解冻费、保证金等费用是虚假贷款常见套路。' },
-  { _id: 'qst_seed_006', fraudTags: ['fake_loan'], stem: '有贷款需求时，优先应从哪里办理？', options: [['A', '陌生短信链接'], ['B', '正规金融机构官方渠道'], ['C', '社交群里的客服'], ['D', '来历不明的应用安装包']], correct: 'B', explanation: '官方渠道可降低钓鱼和虚假贷款风险。' },
-  { _id: 'qst_seed_007', fraudTags: ['fake_refund'], stem: '陌生客服称可退款并要求开启屏幕共享，应该？', options: [['A', '开启共享方便操作'], ['B', '只共享支付页面'], ['C', '拒绝共享并从原订单平台核验'], ['D', '先告知支付密码']], correct: 'C', explanation: '屏幕共享可能泄露密码和验证码，退款应在原订单平台完成。' },
-  { _id: 'qst_seed_008', fraudTags: ['fake_refund'], stem: '收到退款链接后，最安全的处理方式是？', options: [['A', '直接点击填写信息'], ['B', '转发给同学一起填写'], ['C', '只在原平台订单页发起退款'], ['D', '下载客服指定软件']], correct: 'C', explanation: '陌生退款链接可能是钓鱼页面，应从原平台独立进入。' },
-  { _id: 'qst_seed_009', fraudTags: ['other'], stem: '下列哪项最能保护校园账号安全？', options: [['A', '多个平台共用简单密码'], ['B', '把验证码发给室友'], ['C', '设置独立强密码并开启二次验证'], ['D', '在公共电脑保存密码']], correct: 'C', explanation: '独立强密码和二次验证能显著降低账号被盗风险。' },
-  { _id: 'qst_seed_010', fraudTags: ['other'], stem: '收到“校园账号异常”的短信链接时，应该？', options: [['A', '立刻点击登录'], ['B', '从官方应用或学校门户独立核验'], ['C', '把账号密码回复短信'], ['D', '把链接发到群里求助']], correct: 'B', explanation: '应避开短信中的陌生链接，直接从官方入口核验账号状态。' },
-]);
-
-function asOptions(options) { return options.map(([id, text]) => ({ id, text })); }
-
 function buildLearningArticles(authorId) {
   if (typeof authorId !== 'string' || !authorId.trim()) throw new Error('A reviewed security authorId is required');
   return ARTICLE_SEEDS.map((article, index) => ({ ...article, authorId: authorId.trim(), publishStatus: 'published', publishedAt: new Date(Date.UTC(2026, 8, 1 + index, 8, 0, 0)), version: 1, createdAt: new Date(Date.UTC(2026, 8, 1 + index, 8, 0, 0)), updatedAt: new Date(Date.UTC(2026, 8, 1 + index, 8, 0, 0)) }));
 }
 
-function buildQuizQuestions() {
-  return QUESTION_SEEDS.map((question, index) => ({ _id: question._id, questionType: 'single', stem: question.stem, options: asOptions(question.options), correctOptionIds: [question.correct], explanation: question.explanation, fraudTags: question.fraudTags, status: 'enabled', version: 1, createdAt: new Date(Date.UTC(2026, 8, 10, 8, index, 0)), updatedAt: new Date(Date.UTC(2026, 8, 10, 8, index, 0)) }));
-}
-
 async function applyLearningFocusSeed(db, { authorId } = {}) {
   if (!db || typeof db.collection !== 'function') throw new Error('A CloudBase db instance is required');
   const articles = buildLearningArticles(authorId);
-  const questions = buildQuizQuestions();
   for (const article of articles) await db.collection('learning_articles').doc(article._id).set({ data: article });
-  for (const question of questions) await db.collection('quiz_questions').doc(question._id).set({ data: question });
-  return { learningArticles: articles.length, quizQuestions: questions.length };
+  return { learningArticles: articles.length };
 }
 
-module.exports = { ARTICLE_SEEDS, QUESTION_SEEDS, applyLearningFocusSeed, asOptions, buildLearningArticles, buildQuizQuestions };
+module.exports = { ARTICLE_SEEDS, applyLearningFocusSeed, buildLearningArticles };

@@ -235,11 +235,6 @@ const pageDefinition = {
     wx.navigateTo({ url: "/pages/learning/index/index" });
   },
 
-  goToQuiz() {
-    if (!this.data.profile || this.data.profile.role !== "student") return;
-    wx.navigateTo({ url: "/pages/quiz/index/index" });
-  },
-
   goToCounselorReports(event) {
     if (!this.data.profile || this.data.profile.role !== "counselor") return;
     const scope = event && event.currentTarget && event.currentTarget.dataset ? event.currentTarget.dataset.scope : "pending";

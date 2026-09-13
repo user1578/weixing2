@@ -9,8 +9,6 @@
     "pages/reports/detail/index",
     "pages/learning/index/index",
     "pages/learning/detail/index",
-    "pages/quiz/index/index",
-    "pages/quiz/result/index",
     "pages/counselor/reports/index",
     "pages/counselor/reports/detail/index",
     "pages/counselor/focus/index"

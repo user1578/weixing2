@@ -1,9 +1,0 @@
-<view class="page">
-  <view class="state_card error_state" wx:if="{{errorMessage}}"><view>{{errorMessage}}</view><button class="retry_button" bindtap="retryQuiz">重新自测</button></view>
-  <view wx:elif="{{result}}">
-    <view class="score_card"><view class="score_kicker">本次得分</view><view class="score_value">{{result.scorePercent}}<text>%</text></view><view class="score_detail">答对 {{result.correctCount}} / {{result.totalCount}} 题</view></view>
-    <view class="section_title">答题解析</view>
-    <view class="result_card" wx:for="{{result.questions}}" wx:key="number"><view class="result_top"><view>第 {{item.number}} 题</view><view class="result_status {{item.correct ? 'right' : 'wrong'}}">{{item.correctText}}</view></view><view class="answer_line">正确答案：{{item.correctAnswer}}</view><view class="explanation" wx:if="{{item.explanation}}">{{item.explanation}}</view></view>
-    <button class="retry_button" bindtap="retryQuiz">再测一次</button>
-  </view>
-</view>
